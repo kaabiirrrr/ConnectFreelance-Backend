@@ -1,0 +1,27 @@
+[
+  {
+    "name": "Kabir More",
+    "role": "Co-Founder & Chief Executive Officer (CEO)",
+    "description": "Kabir leads product vision and platform architecture of Connect. He focuses on building scalable systems such as escrow protection, Job Success Score algorithms, and structured workflows."
+  },
+  {
+    "name": "Rohan Patil",
+    "role": "Co-Founder & Chief Marketing Officer (CMO)",
+    "description": "Rohan leads the marketing and growth strategy of Connect, focusing on digital marketing, user acquisition, and building a strong brand presence."
+  },
+  {
+    "name": "Samarth Shendge",
+    "role": "Chief Technology Officer (CTO)",
+    "description": "Samarth leads the technical vision of Connect, ensuring the platform is robust, scalable, and performance-driven. He oversees backend development, API architecture, and database management."
+  },
+  {
+    "name": "Vijay Biradar",
+    "role": "Chief Product Officer (CPO)",
+    "description": "Vijay drives the product strategy of Connect, focusing on creating a seamless and user-friendly experience for both clients and freelancers."
+  },
+  {
+    "name": "Vaibhav Pawar",
+    "role": "Chief Operations Officer (COO)",
+    "description": "Vaibhav oversees the operational flow of Connect, managing workflows, coordinating between team members, and ensuring testing and quality assurance."
+  }
+]

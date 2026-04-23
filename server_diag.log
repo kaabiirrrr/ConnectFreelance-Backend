@@ -1,0 +1,13 @@
+STARTING SERVER...
+[dotenv@17.3.1] injecting env (32) from .env -- tip: 🤖 agentic secret storage: https://dotenvx.com/as2
+[Config] Supabase URL: https://ogtkjtbvbkyddutnmcov.supabase.co
+[Config] Supabase Key Available: true
+[dotenv@17.3.1] injecting env (0) from .env -- tip: ⚙️  suppress all logs with { quiet: true }
+[dotenv@17.3.1] injecting env (0) from .env -- tip: ⚙️  enable debug logging with { debug: true }
+=========================================
+SERVER LISTENING ON PORT: 5001
+=========================================
+[Boot] Registering API routes...
+[Boot] All routes registered.
+[Boot] Server stabilization complete.
+[Redis] Unavailable: connect ECONNREFUSED 127.0.0.1:6379. Switching to In-Memory Fallback.

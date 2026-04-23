@@ -1,0 +1,86 @@
+services:
+  - type: web
+    name: connect-backend
+    runtime: node
+    region: singapore
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    autoDeploy: true
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+
+      # ── Supabase ──────────────────────────────────────────────
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+
+      # ── Auth ──────────────────────────────────────────────────
+      - key: JWT_SECRET
+        sync: false
+
+      # ── URLs ──────────────────────────────────────────────────
+      - key: FRONTEND_URL
+        value: https://connectfreelance.in
+      - key: CLIENT_URL
+        value: https://connectfreelance.in
+      - key: BACKEND_URL
+        value: https://connect-backend-1-dm8d.onrender.com
+      - key: ALLOWED_ORIGINS
+        value: https://connectfreelance.in,https://www.connectfreelance.in
+
+      # ── Email ─────────────────────────────────────────────────
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_PORT
+        sync: false
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+
+      # ── Payments ──────────────────────────────────────────────
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+
+      # ── AI ────────────────────────────────────────────────────
+      - key: GROQ_API_KEY
+        sync: false
+
+      # ── Video ─────────────────────────────────────────────────
+      - key: AGORA_APP_ID
+        sync: false
+      - key: AGORA_APP_CERTIFICATE
+        sync: false
+      - key: AGORA_CUSTOMER_ID
+        sync: false
+      - key: AGORA_CUSTOMER_SECRET
+        sync: false
+
+      # ── Admin ─────────────────────────────────────────────────
+      - key: SUPER_ADMIN_EMAIL
+        sync: false
+
+      # ── Rate Limiting ─────────────────────────────────────────
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "900000"
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: "100"
+      - key: AUTH_RATE_LIMIT_MAX
+        value: "5"

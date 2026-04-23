@@ -1,0 +1,32 @@
+STARTING SERVER...
+[dotenv@17.3.1] injecting env (32) from .env -- tip: 🛡️ auth for agents: https://vestauth.com
+[Config] Supabase URL: https://ogtkjtbvbkyddutnmcov.supabase.co
+[Config] Supabase Key Available: true
+[dotenv@17.3.1] injecting env (0) from .env -- tip: 🤖 agentic secret storage: https://dotenvx.com/as2
+[dotenv@17.3.1] injecting env (0) from .env -- tip: 🛡️ auth for agents: https://vestauth.com
+=========================================
+SERVER LISTENING ON PORT: 5001
+=========================================
+[Boot] Registering API routes...
+[Boot] All routes registered.
+[Boot] Server stabilization complete.
+[Redis] Unavailable: connect ECONNREFUSED 127.0.0.1:6379. Switching to In-Memory Fallback.
+GET /api/health
+GET /api/profile/freelancers?limit=10
+GET /api/profile/freelancers?limit=15
+GET /api/services?limit=50
+GET /api/stats/global
+GET /api/profile/status
+GET /api/profile/freelancers?limit=10
+GET /api/profile/freelancers?limit=15
+GET /api/services?limit=50
+GET /api/stats/global
+GET /api/services?limit=50
+GET /api/profile/freelancers?limit=10
+GET /api/profile/freelancers?limit=15
+GET /api/stats/global
+GET /api/profile/status
+GET /api/profile/freelancers?limit=10
+GET /api/services?limit=50
+GET /api/profile/freelancers?limit=15
+GET /api/stats/global
