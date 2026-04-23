@@ -451,7 +451,7 @@ exports.updateProfileStatus = async (req, res, next) => {
             };
         } else if (step === 'personal_info') {
             if (stepData.bio) updates.bio = stepData.bio;
-            if (stepData.experience) updates.experience = stepData.experience;
+            // Don't write experience string to jsonb experience column — store in step_data only
             updates.step_data = {
                 ...existingStepData,
                 personal_info: {
