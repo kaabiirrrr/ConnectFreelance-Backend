@@ -130,8 +130,9 @@ app.use(helmet({
                 "'self'", 
                 'https://*.supabase.co', 
                 'wss://*.supabase.co',
-                'https://connect-backend-1-dm8d.onrender.com', // Explicit allow for production backend
-                'wss://connect-backend-1-dm8d.onrender.com',    // WebSocket allow
+                'https://connect-backend-1-dm8d.onrender.com', // legacy
+    'https://connectfreelance-backend.onrender.com',
+    'wss://connectfreelance-backend.onrender.com',
                 'https://connectfreelance.in',
                 'http://localhost:*',
                 'http://127.0.0.1:*',

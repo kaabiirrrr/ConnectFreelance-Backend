@@ -33,7 +33,7 @@ services:
       - key: CLIENT_URL
         value: https://connectfreelance.in
       - key: BACKEND_URL
-        value: https://connect-backend-1-dm8d.onrender.com
+        value: https://connectfreelance-backend.onrender.com
       - key: ALLOWED_ORIGINS
         value: https://connectfreelance.in,https://www.connectfreelance.in
 
