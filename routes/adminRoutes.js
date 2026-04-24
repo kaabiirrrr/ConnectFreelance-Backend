@@ -78,10 +78,16 @@ router.put('/users/:id/toggle-status', protectAdmin, authorizeAdmin(ADMIN_ROLES.
 router.post('/users/:id/reset-password', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminUserController.resetUserPassword);
 router.delete('/users/:id', protectAdmin, authorizeAdmin(ADMIN_ROLES.SUPER_ADMIN), adminUserController.deleteUser);
 
-// Verification routes
+// Verification routes (legacy)
 router.get('/verification/requests', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminVerificationController.getVerificationRequests);
 router.put('/verification/:userId', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminVerificationController.updateVerificationStatus);
 router.put('/freelancers/:userId/featured', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminVerificationController.toggleFeaturedStatus);
+
+// Verification routes (new — full management)
+router.get('/verifications/:role', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminVerificationController.getVerificationList);
+router.patch('/verifications/:id/approve', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminVerificationController.approveVerification);
+router.patch('/verifications/:id/reject', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminVerificationController.rejectVerification);
+router.post('/verifications/send-reminder', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminVerificationController.sendReminder);
 
 // ==========================================
 // Finance & Withdrawals
