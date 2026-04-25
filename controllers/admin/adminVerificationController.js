@@ -150,7 +150,6 @@ exports.getVerificationList = async (req, res, next) => {
     } catch (error) {
         logger.error('[getVerificationList] Error:', error?.message || error);
         next(error);
-        next(error);
     }
 };
 
