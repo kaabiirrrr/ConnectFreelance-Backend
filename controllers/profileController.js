@@ -1056,7 +1056,8 @@ exports.getClientProfile = async (req, res, next) => {
             .select(`
                 id:user_id, user_id, name, role, avatar_url, title, bio, 
                 company_name, company_website, industry, company_size, 
-                country, city, location, is_client_profile_complete, profile_completed
+                country, city, location, is_client_profile_complete, profile_completed,
+                phone, website, step_data
             `)
             .eq('user_id', userId)
             .maybeSingle();

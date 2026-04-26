@@ -106,16 +106,28 @@ exports.listDirectContracts = async (req, res, next) => {
         const role = req.user.role;
         const roleField = role === 'CLIENT' ? 'client_id' : 'freelancer_id';
 
-        const { data, error } = await adminClient
+        let { data, error } = await adminClient
             .from('contracts')
             .select(`
                 *,
-                client:users!contracts_client_id_fkey(id, profiles(name, avatar_url)),
-                freelancer:users!contracts_freelancer_id_fkey(id, profiles(name, avatar_url, title))
+                client:client_id(id, profiles(name, avatar_url)),
+                freelancer:freelancer_id(id, profiles(name, avatar_url, title))
             `)
             .eq(roleField, userId)
             .eq('is_direct', true)
             .order('created_at', { ascending: false });
+
+        // Fallback without joins if FK names don't match
+        if (error) {
+            const fallback = await adminClient
+                .from('contracts')
+                .select('*')
+                .eq(roleField, userId)
+                .eq('is_direct', true)
+                .order('created_at', { ascending: false });
+            data = fallback.data;
+            error = fallback.error;
+        }
 
         if (error) throw error;
 
@@ -136,16 +148,34 @@ exports.getDirectContract = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'Invalid contract ID' });
         }
 
-        const { data, error } = await adminClient
+        // Try with FK hints first, fall back to simple select if FK names don't match
+        let data, error;
+
+        const result = await adminClient
             .from('contracts')
             .select(`
                 *,
-                client:users!contracts_client_id_fkey(id, profiles(name, avatar_url, company_name)),
-                freelancer:users!contracts_freelancer_id_fkey(id, profiles(name, avatar_url, title, hourly_rate))
+                client:client_id(id, profiles(name, avatar_url, company_name)),
+                freelancer:freelancer_id(id, profiles(name, avatar_url, title, hourly_rate))
             `)
             .eq('id', id)
             .eq('is_direct', true)
             .maybeSingle();
+
+        data = result.data;
+        error = result.error;
+
+        // Fallback: if join fails, fetch without joins
+        if (error) {
+            const fallback = await adminClient
+                .from('contracts')
+                .select('*')
+                .eq('id', id)
+                .eq('is_direct', true)
+                .maybeSingle();
+            data = fallback.data;
+            error = fallback.error;
+        }
 
         if (error) throw error;
         if (!data) return res.status(404).json({ success: false, message: 'Contract not found' });
