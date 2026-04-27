@@ -644,7 +644,7 @@ exports.getAllFreelancers = async (req, res, next) => {
 
         let query = adminClient
             .from('profiles')
-            .select('user_id, name, avatar_url, title, bio, skills, hourly_rate, is_verified, category, rating, profile_completed, has_availability_badge, created_at', { count: 'exact' })
+            .select('user_id, name, avatar_url, title, bio, skills, hourly_rate, step_data, is_verified, category, rating, profile_completed, has_availability_badge, created_at', { count: 'exact' })
             .eq('role', 'FREELANCER');
 
         if (category) {
@@ -674,11 +674,21 @@ exports.getAllFreelancers = async (req, res, next) => {
 
         const totalPages = Math.ceil((count || 0) / limit);
 
-        const sanitizedData = (data || []).map(f => ({
-            ...f,
-            id: f.user_id, // Map for frontend components expecting .id
-            skills: Array.isArray(f.skills) ? f.skills : []
-        }));
+        const sanitizedData = (data || []).map(f => {
+            // Resolve hourly_rate: direct column → step_data fallback
+            let resolvedRate = f.hourly_rate;
+            if (!resolvedRate && f.step_data?.professional_info?.rate) {
+                const parsed = parseFloat(String(f.step_data.professional_info.rate).replace(/[^0-9.]/g, ''));
+                if (!isNaN(parsed) && parsed > 0) resolvedRate = parsed;
+            }
+            return {
+                ...f,
+                id: f.user_id,
+                hourly_rate: resolvedRate || null,
+                skills: Array.isArray(f.skills) ? f.skills : [],
+                step_data: undefined, // don't expose step_data to frontend
+            };
+        });
 
         // Increments search presence for all matching profiles if it's a real keyword search
         if (search && sanitizedData.length > 0) {
