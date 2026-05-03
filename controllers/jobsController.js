@@ -147,7 +147,7 @@ exports.getAllJobs = async (req, res, next) => {
         const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
         const offset = (page - 1) * limit;
 
-        let query = supabase
+        let query = adminClient
             .from('jobs')
             .select(`
                 id, title, description, category, skills, budget_type, 
@@ -215,7 +215,7 @@ exports.getAllJobs = async (req, res, next) => {
         const clientIds = [...new Set(jobs.map(j => j.client_id).filter(Boolean))];
         let profileMap = {};
         if (clientIds.length > 0) {
-            const { data: profiles } = await supabase
+            const { data: profiles } = await adminClient
                 .from('profiles')
                 .select('user_id, name, company_name, avatar_url, country, location')
                 .in('user_id', clientIds);
@@ -283,7 +283,7 @@ exports.getJobFilterStats = async (req, res, next) => {
 exports.getJobById = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { data, error } = await supabase
+        const { data, error } = await adminClient
             .from('jobs')
             .select(`
                 id, title, description, category, skills, budget_type, 
@@ -614,7 +614,7 @@ exports.toggleSaveJob = async (req, res, next) => {
 exports.searchJobs = async (req, res, next) => {
     try {
         const q = req.query.q || '';
-        const { data, error } = await supabase
+        const { data, error } = await adminClient
             .from('jobs')
             .select(`
                 id, title, description, category, skills, budget_type, 
