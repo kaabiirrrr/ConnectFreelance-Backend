@@ -120,7 +120,7 @@ exports.getMe = async (req, res, next) => {
                 location, country, city, experience, portfolio, rating, 
                 is_verified, profile_completed, profile_completion_percentage, 
                 connects_balance, has_availability_badge,
-                is_banned, is_restricted, warning_count, trust_score,
+                is_banned, is_restricted, warning_count,
                 dob, gender, phone, website, step_data
             `)
             .eq('user_id', userId)
@@ -148,19 +148,7 @@ exports.getMe = async (req, res, next) => {
             throw fetchError;
         }
 
-        // --- TRUSt SCORE DYNAMIC SYNC ---
-        // If trust_score is missing or we need to ensure it's "real" data
-        if (profile) {
-            const baseScore = profile.is_verified ? 100 : 95;
-            const penalty = (profile.warning_count || 0) * 5;
-            const calculatedScore = Math.max(0, baseScore - penalty);
-            
-            // If DB score is missing or vastly different, sync it (background)
-            if (profile.trust_score === null || profile.trust_score === 0) {
-                 profile.trust_score = calculatedScore;
-                 adminClient.from('profiles').update({ trust_score: calculatedScore }).eq('user_id', userId).then();
-            }
-        }
+
 
         if (!profile) {
             return res.status(200).json({
@@ -200,7 +188,7 @@ exports.updateProfile = async (req, res, next) => {
             .from('profiles')
             .update(updates)
             .eq('user_id', userId)
-            .select('id:user_id, user_id, name, title, bio, avatar_url, skills, hourly_rate, location, country, city, experience, portfolio, rating, is_verified, profile_completed, trust_score, dob, gender, phone, website, step_data')
+            .select('id:user_id, user_id, name, title, bio, avatar_url, skills, hourly_rate, location, country, city, experience, portfolio, rating, is_verified, profile_completed, dob, gender, phone, website, step_data')
             .maybeSingle(); // Use maybeSingle to avoid PGRST116
 
         if (error) {
@@ -307,6 +295,8 @@ exports.updateProfileStatus = async (req, res, next) => {
     try {
         const userId = req.user.id;
         const { step, data: stepData } = req.body;
+
+        logger.log(`[ProfileUpdate] Received update for step: ${step}`, { userId, stepData });
 
         // Fetch existing profile — use safe columns only to avoid missing-column errors
         const { data: profile, error: fetchError } = await adminClient
@@ -436,7 +426,10 @@ exports.updateProfileStatus = async (req, res, next) => {
             // Store years of experience only in step_data (experience column is reserved for work history array)
             if (stepData.rate) {
                 const numericRate = parseFloat(String(stepData.rate).replace(/[^0-9.]/g, ''));
-                if (!isNaN(numericRate)) updates.hourly_rate = numericRate;
+                if (!isNaN(numericRate)) {
+                    updates.hourly_rate = numericRate;
+                    logger.log(`[ProfileUpdate] Setting hourly_rate to: ${numericRate} for user ${userId}`);
+                }
             }
             if (stepData.phone) updates.phone = stepData.phone;
             if (stepData.website) updates.website = stepData.website;
@@ -551,7 +544,7 @@ exports.updateProfileStatus = async (req, res, next) => {
                 'step_data', 'portfolio', 'skills', 'experience', 'hourly_rate',
                 'location', 'country', 'city', 'updated_at',
                 // Analytics / feature flags
-                'trust_score', 'has_availability_badge', 'is_profile_complete'
+                'has_availability_badge', 'is_profile_complete'
             ];
 
             const safePayload = { ...updates };
@@ -675,11 +668,16 @@ exports.getAllFreelancers = async (req, res, next) => {
         const totalPages = Math.ceil((count || 0) / limit);
 
         const sanitizedData = (data || []).map(f => {
-            // Resolve hourly_rate: direct column → step_data fallback
+            // Resolve hourly_rate: direct column → multiple step_data paths fallback
             let resolvedRate = f.hourly_rate;
-            if (!resolvedRate && f.step_data?.professional_info?.rate) {
-                const parsed = parseFloat(String(f.step_data.professional_info.rate).replace(/[^0-9.]/g, ''));
-                if (!isNaN(parsed) && parsed > 0) resolvedRate = parsed;
+            if (!resolvedRate || Number(resolvedRate) === 0) {
+                const stepRate = f.step_data?.professional_info?.rate || 
+                                f.step_data?.professional?.rate || 
+                                f.step_data?.rate;
+                if (stepRate) {
+                    const parsed = parseFloat(String(stepRate).replace(/[^0-9.]/g, ''));
+                    if (!isNaN(parsed) && parsed > 0) resolvedRate = parsed;
+                }
             }
             return {
                 ...f,
@@ -723,7 +721,7 @@ exports.getPublicProfile = async (req, res, next) => {
                 id:user_id, user_id, name, title, bio, avatar_url, role, 
                 skills, hourly_rate, location, country, city,
                 experience, portfolio, rating, is_verified, 
-                profile_completed, profile_views, search_presence, trust_score,
+                profile_completed, profile_views, search_presence,
                 has_availability_badge, created_at,
                 is_banned, is_restricted, warning_count,
                 dob, gender, phone, website, step_data,

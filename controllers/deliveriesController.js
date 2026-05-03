@@ -274,12 +274,37 @@ exports.getDeliveriesByJob = async (req, res, next) => {
         const userId = req.user.id;
         const userRole = req.user.role;
 
-        // 1. Fetch Job Members for metadata and role-info
-        const { data: members } = await adminClient
-            .from('job_members')
-            .select('*')
-            .eq('job_id', jobId)
-            .eq('status', 'active');
+        // 1. Fetch Job Members for metadata and role-info (Resilient Fallback)
+        let members = [];
+        try {
+            const { data: mData, error: mErr } = await adminClient
+                .from('job_members')
+                .select('*')
+                .eq('job_id', jobId)
+                .eq('status', 'active');
+            
+            if (!mErr && mData && mData.length > 0) {
+                members = mData;
+            } else {
+                // FALLBACK: Derive from contracts if job_members is missing/empty (Enterprise Workspace not initialized)
+                const { data: cData } = await adminClient
+                    .from('contracts')
+                    .select('freelancer_id, created_at')
+                    .eq('job_id', jobId)
+                    .eq('status', 'ACTIVE');
+                
+                if (cData) {
+                    members = cData.map(c => ({
+                        user_id: c.freelancer_id,
+                        role: 'Task Specialist',
+                        status: 'active',
+                        joined_at: c.created_at
+                    }));
+                }
+            }
+        } catch (e) {
+            console.error('[Deliveries] Members fallback error:', e.message);
+        }
 
         // 2. Fetch Deliveries
         const { data, error } = await adminClient

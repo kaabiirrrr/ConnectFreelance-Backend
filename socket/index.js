@@ -4,7 +4,7 @@ const adminClient = require('../supabase/adminClient');
 const logger = require('../utils/logger');
 const moderationService = require('../services/moderationService');
 const enforcementService = require('../services/enforcementService');
-
+const notificationHelper = require('../utils/notificationHelper');
 
 // Socket Rate Limiting (Strikes)
 const strikeCounts = new Map(); // socketId -> { count, lastReset }
@@ -338,6 +338,24 @@ function initSocketIO(httpServer) {
 
                 // Broadcast to all in the conversation room
                 io.to(`conv:${conversationId}`).emit('new-message', message);
+
+                // --- EMAIL NOTIFICATION ---
+                try {
+                    const { data: convRow } = await adminClient.from('conversations').select('client_id, freelancer_id').eq('id', conversationId).single();
+                    if (convRow) {
+                        const targetUserId = convRow.client_id === userId ? convRow.freelancer_id : convRow.client_id;
+                        const { data: senderProfile } = await adminClient.from('profiles').select('name').eq('user_id', userId).maybeSingle();
+                        const senderName = senderProfile?.name || 'A user';
+
+                        // Check and send notification (only if the user is offline to avoid spam, or always if you prefer. We'll check onlineUsers map)
+                        const isOnline = onlineUsers.has(targetUserId);
+                        if (!isOnline) {
+                            await notificationHelper.checkAndSendNotification(targetUserId, 'email_messages', { senderName });
+                        }
+                    }
+                } catch (err) {
+                    logger.error('[Socket] Failed to send message email notification:', err.message);
+                }
 
             } catch (err) {
                 logger.error('[Socket] send-message error:', err);

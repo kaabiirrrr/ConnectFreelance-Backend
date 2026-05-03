@@ -1,6 +1,7 @@
 const supabase = require('../supabase/client');
 const adminClient = require('../supabase/adminClient');
 const { releasePendingFunds } = require('./walletController');
+const notificationHelper = require('../utils/notificationHelper');
 
 // Valid status transitions
 const VALID_TRANSITIONS = {
@@ -173,6 +174,17 @@ exports.updateStatus = async (req, res, next) => {
             type: 'CONTRACT',
             link: isClient ? '/freelancer/projects' : '/client/projects'
         }]).catch(() => {});
+
+        // --- EMAIL NOTIFICATION ---
+        try {
+            await notificationHelper.checkAndSendNotification(notifyUser, 'email_contracts', {
+                contractTitle: milestone.title, // or pass the actual contract title if we fetched it, but title is fine
+                updateType: `Milestone status changed to ${newStatus}`,
+                details: `${statusMessages[newStatus]} milestone.`
+            });
+        } catch (err) {
+            console.error('[MilestoneController] Failed to send email update:', err.message);
+        }
 
         res.status(200).json({
             success: true,

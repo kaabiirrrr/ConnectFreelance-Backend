@@ -175,3 +175,85 @@ exports.sendVerificationReminderEmail = async (toEmail, name = 'User', role = 'u
 </div>`,
     });
 };
+
+// ─── NOTIFICATION EMAILS ──────────────────────────────────────────────────────
+
+exports.sendProposalEmail = async (toEmail, jobTitle, freelancerName) => {
+    try {
+        await sendEmail({
+            to: toEmail,
+            subject: `New Proposal on your job: ${jobTitle}`,
+            html: `
+<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:auto;background:#0F172A;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);">
+  <div style="background:linear-gradient(135deg,#0ea5e9,#6366f1);padding:28px 40px;text-align:center;">
+    <h1 style="margin:0;color:#fff;font-size:22px;font-weight:800;">New Proposal Received</h1>
+  </div>
+  <div style="padding:40px;">
+    <p style="color:#e2e8f0;font-size:16px;">Hello,</p>
+    <p style="color:#94a3b8;font-size:15px;line-height:1.7;">Good news! <strong>${freelancerName}</strong> has just submitted a proposal for your job <strong>"${jobTitle}"</strong>.</p>
+    <div style="text-align:center;margin:32px 0;">
+      <a href="https://connectfreelance.in/dashboard/jobs" style="background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff;text-decoration:none;padding:14px 40px;border-radius:50px;font-weight:700;font-size:15px;">Review Proposal →</a>
+    </div>
+    <p style="color:#475569;font-size:12px;text-align:center;margin-top:24px;">© ${new Date().getFullYear()} Connect Freelance</p>
+  </div>
+</div>`,
+        });
+    } catch (err) {
+        logger.error(`[Email] Proposal send failed to ${toEmail}:`, err?.response?.data || err.message);
+    }
+};
+
+exports.sendMessageEmail = async (toEmail, senderName) => {
+    try {
+        await sendEmail({
+            to: toEmail,
+            subject: `New message from ${senderName}`,
+            html: `
+<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:auto;background:#0F172A;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);">
+  <div style="background:linear-gradient(135deg,#0ea5e9,#6366f1);padding:28px 40px;text-align:center;">
+    <h1 style="margin:0;color:#fff;font-size:22px;font-weight:800;">New Message</h1>
+  </div>
+  <div style="padding:40px;">
+    <p style="color:#e2e8f0;font-size:16px;">Hello,</p>
+    <p style="color:#94a3b8;font-size:15px;line-height:1.7;">You have a new direct message from <strong>${senderName}</strong> on Connect Freelance.</p>
+    <div style="text-align:center;margin:32px 0;">
+      <a href="https://connectfreelance.in/dashboard/messages" style="background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff;text-decoration:none;padding:14px 40px;border-radius:50px;font-weight:700;font-size:15px;">View Message →</a>
+    </div>
+    <p style="color:#475569;font-size:12px;text-align:center;margin-top:24px;">© ${new Date().getFullYear()} Connect Freelance</p>
+  </div>
+</div>`,
+        });
+    } catch (err) {
+        logger.error(`[Email] Message send failed to ${toEmail}:`, err?.response?.data || err.message);
+    }
+};
+
+exports.sendContractUpdateEmail = async (toEmail, contractTitle, updateType, details = '') => {
+    try {
+        await sendEmail({
+            to: toEmail,
+            subject: `Contract Update: ${contractTitle}`,
+            html: `
+<div style="font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:auto;background:#0F172A;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);">
+  <div style="background:linear-gradient(135deg,#0ea5e9,#6366f1);padding:28px 40px;text-align:center;">
+    <h1 style="margin:0;color:#fff;font-size:22px;font-weight:800;">Contract Update</h1>
+  </div>
+  <div style="padding:40px;">
+    <p style="color:#e2e8f0;font-size:16px;">Hello,</p>
+    <p style="color:#94a3b8;font-size:15px;line-height:1.7;">There is an update on your contract: <strong>${contractTitle}</strong>.</p>
+    <div style="background:rgba(14,165,233,0.08);border:1px solid rgba(14,165,233,0.2);border-radius:12px;padding:20px;margin:24px 0;">
+      <p style="color:#38bdf8;font-size:14px;margin:0;"><strong>Update:</strong> ${updateType}</p>
+      ${details ? `<p style="color:#94a3b8;font-size:13px;margin:8px 0 0;">${details}</p>` : ''}
+    </div>
+    <div style="text-align:center;margin:32px 0;">
+      <a href="https://connectfreelance.in/dashboard/contracts" style="background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff;text-decoration:none;padding:14px 40px;border-radius:50px;font-weight:700;font-size:15px;">View Contract →</a>
+    </div>
+    <p style="color:#475569;font-size:12px;text-align:center;margin-top:24px;">© ${new Date().getFullYear()} Connect Freelance</p>
+  </div>
+</div>`,
+        });
+    } catch (err) {
+        logger.error(`[Email] Contract update send failed to ${toEmail}:`, err?.response?.data || err.message);
+    }
+};
+

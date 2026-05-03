@@ -1,4 +1,4 @@
-const supabase = require('../supabase/client');
+const supabase = require('../supabase/adminClient');
 const logger = require('../utils/logger');
 
 /**
@@ -7,10 +7,10 @@ const logger = require('../utils/logger');
  */
 exports.getGlobalStats = async (req, res, next) => {
     try {
-        // Fetch total profiles count (Registered Users)
+        // Fetch total users count (Registered Users)
         const { count: userCount, error: userError } = await supabase
-            .from('profiles')
-            .select('user_id', { count: 'exact', head: true });
+            .from('users')
+            .select('*', { count: 'exact', head: true });
 
         if (userError) throw userError;
 

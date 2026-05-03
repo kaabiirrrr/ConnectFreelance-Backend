@@ -105,7 +105,7 @@ exports.getUserContracts = async (req, res, next) => {
 
         const roleField = role === 'CLIENT' ? 'client_id' : 'freelancer_id';
 
-        const { data, error } = await supabase
+        const { data, error } = await adminClient
             .from('contracts')
             .select(`
                 id, proposal_id, job_id, client_id, freelancer_id, 

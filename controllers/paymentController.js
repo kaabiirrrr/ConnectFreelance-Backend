@@ -373,9 +373,48 @@ exports.verifyRazorpayEscrow = async (req, res, next) => {
         }]);
 
         res.status(200).json({ success: true, message: 'Escrow funded successfully' });
-
     } catch (err) {
         logger.error('[Escrow] Razorpay Verification Error:', err);
         next(err);
     }
 };
+
+/**
+ * Get payment history for the current user
+ * GET /api/payments/history
+ */
+exports.getMyPayments = async (req, res, next) => {
+    try {
+        const userId = req.user.id;
+        
+        // Fetch payments where user is either payer or payee
+        // Join with contracts and jobs to get context
+        const { data, error } = await supabase
+            .from('payments')
+            .select(`
+                *,
+                contracts (
+                    id,
+                    title,
+                    jobs (
+                        id,
+                        title
+                    )
+                )
+            `)
+            .or(`payer_id.eq.${userId},payee_id.eq.${userId}`)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        res.status(200).json({
+            success: true,
+            data: data || [],
+            message: 'Payment history retrieved successfully'
+        });
+    } catch (error) {
+        logger.error('[Payment History] Error:', error);
+        next(error);
+    }
+};
+

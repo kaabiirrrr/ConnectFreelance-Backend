@@ -62,7 +62,7 @@ exports.getMyServices = async (req, res, next) => {
         const freelancerId = req.user.id;
         const { data, error } = await adminClient
             .from('services')
-            .select('id, title, category, price, is_active, created_at, images, orders_count, rating')
+            .select('id, title, description, category, subcategory, price, delivery_days, revisions, tags, is_active, created_at, images, orders_count, rating')
             .eq('freelancer_id', freelancerId)
             .order('created_at', { ascending: false });
 

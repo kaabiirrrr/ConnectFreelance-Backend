@@ -12,6 +12,7 @@ const { financialBackpressure } = require('../utils/dbUtils');
 
 router.use(protect); // Remaining routes require auth
 
+router.get('/history', paymentController.getMyPayments);
 router.post('/create-intent', authorize('CLIENT'), validate(createIntentSchema), paymentController.createIntent);
 router.post('/escrow-deposit', authorize('CLIENT'), validate(escrowDepositSchema), paymentController.escrowDeposit);
 router.post('/release', authorize('CLIENT'), financialBackpressure, validate(releaseEscrowSchema), paymentController.releaseEscrow);

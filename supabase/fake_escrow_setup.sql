@@ -46,9 +46,27 @@ BEGIN
         pending_balance = pending_balance + p_amount
     WHERE user_id = p_client_id;
 
-    -- 3. Create transaction record
-    INSERT INTO public.fake_escrow_transactions (client_id, freelancer_id, contract_id, milestone_id, amount, status)
-    VALUES (p_client_id, p_freelancer_id, p_contract_id, p_milestone_id, p_amount, 'FUNDED');
+    -- 3. Create transaction record in escrow_ledger
+    INSERT INTO public.escrow_ledger (
+        sender_id, 
+        receiver_id, 
+        contract_id, 
+        milestone_id, 
+        amount, 
+        type,
+        status,
+        is_sandbox
+    )
+    VALUES (
+        p_client_id, 
+        p_freelancer_id, 
+        p_contract_id, 
+        p_milestone_id, 
+        p_amount, 
+        'HOLD',
+        'FUNDED',
+        true
+    );
 
     -- 4. Update milestone status
     UPDATE public.milestones SET status = 'FUNDED' WHERE id = p_milestone_id;
@@ -68,10 +86,10 @@ DECLARE
     v_status TEXT;
     v_milestone_id UUID;
 BEGIN
-    -- 1. Fetch and lock transaction
-    SELECT client_id, freelancer_id, amount, status, milestone_id 
+    -- 1. Fetch and lock transaction from escrow_ledger
+    SELECT sender_id, receiver_id, amount, status, milestone_id 
     INTO v_client_id, v_freelancer_id, v_amount, v_status, v_milestone_id
-    FROM public.fake_escrow_transactions WHERE id = p_transaction_id FOR UPDATE;
+    FROM public.escrow_ledger WHERE id = p_transaction_id FOR UPDATE;
 
     IF v_status != 'FUNDED' THEN
         RETURN jsonb_build_object('success', false, 'message', 'Transaction is not in FUNDED state');
@@ -88,8 +106,12 @@ BEGIN
     ON CONFLICT (user_id) DO UPDATE 
     SET available_balance = public.wallets.available_balance + v_amount;
 
-    -- 4. Update transaction status
-    UPDATE public.fake_escrow_transactions SET status = 'RELEASED', updated_at = NOW() WHERE id = p_transaction_id;
+    -- 4. Update transaction status in escrow_ledger
+    UPDATE public.escrow_ledger 
+    SET status = 'RELEASED', 
+        type = 'RELEASE',
+        created_at = NOW() 
+    WHERE id = p_transaction_id;
 
     -- 5. Update milestone status
     UPDATE public.milestones SET status = 'APPROVED', updated_at = NOW() WHERE id = v_milestone_id;

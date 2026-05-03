@@ -6,6 +6,7 @@ const matchService = require('../services/matchService');
 const moderationService = require('../services/moderationService');
 const enforcementService = require('../services/enforcementService');
 const connectsService = require('../services/connectsService');
+const notificationHelper = require('../utils/notificationHelper');
 
 
 
@@ -140,7 +141,21 @@ exports.submitProposal = async (req, res, next) => {
 
         if (insertError) throw insertError;
 
-        // 4. Update Role Analytics
+        // 4. Increment proposal_count on jobs table
+        try {
+            const { data: jobRow } = await supabase
+                .from('jobs')
+                .select('proposal_count')
+                .eq('id', job_id)
+                .maybeSingle();
+
+            await supabase
+                .from('jobs')
+                .update({ proposal_count: (jobRow?.proposal_count || 0) + 1 })
+                .eq('id', job_id);
+        } catch (_) {}
+
+        // 5. Update Role Analytics
         await updateRoleAnalytics(role_id);
 
         // 5. Notifications & Real-time
@@ -155,6 +170,18 @@ exports.submitProposal = async (req, res, next) => {
             
             getIO().to(`room:user:${job.client_id}`).emit('new-proposal', { ...proposal, job_title: job.title });
             getIO().to(`room:job:${job_id}`).emit('proposal_submitted', { role_id, freelancer_id: freelancerId });
+
+            // Send email notification based on preferences
+            try {
+                const { data: fProfile } = await supabase.from('profiles').select('name').eq('user_id', freelancerId).maybeSingle();
+                const freelancerName = fProfile?.name || 'A freelancer';
+                await notificationHelper.checkAndSendNotification(job.client_id, 'email_proposals', {
+                    jobTitle: job.title,
+                    freelancerName: freelancerName
+                });
+            } catch (err) {
+                logger.error('[Notifications] Email proposal dispatch failed', err.message);
+            }
         } catch (_) {}
 
         res.status(201).json({ success: true, data: proposal, message: "Proposal submitted successfully" });

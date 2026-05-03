@@ -9,9 +9,9 @@ const connectsService = require('../services/connectsService');
  */
 
 const CONNECT_PACKAGES = [
-    { id: 'small', connects: 50, price: 50000 }, // price in paise (INR 500)
-    { id: 'medium', connects: 100, connects_bonus: 20, price: 90000, isBestValue: true },
-    { id: 'large', connects: 250, connects_bonus: 50, price: 200000 }
+    { id: 'starter', connects: 50, price: 25000 }, // 50 * 5 = 250 INR
+    { id: 'professional', connects: 100, price: 50000, isBestValue: true }, // 100 * 5 = 500 INR
+    { id: 'ultimate', connects: 200, price: 100000 } // 200 * 5 = 1000 INR
 ];
 
 /**
@@ -181,6 +181,103 @@ exports.getSettings = async (req, res, next) => {
     }
 };
 
-// Logic for buying connect packs (to be integrated with Razorpay if needed)
-exports.createPaymentIntent = async (req, res) => res.status(501).json({ message: "Use membership for connects refill" });
-exports.confirmPayment = async (req, res) => res.status(501).json({ message: "Use membership for connects refill" });
+const Razorpay = require('razorpay');
+const crypto = require('crypto');
+
+const razorpayInstance = new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET,
+});
+
+exports.createPaymentIntent = async (req, res, next) => {
+    try {
+        const { packageId, promoCode } = req.body;
+        const pkg = CONNECT_PACKAGES.find(p => p.id === packageId);
+        
+        if (!pkg) {
+            return res.status(400).json({ success: false, message: "Invalid package selected" });
+        }
+
+        let amountPaise = pkg.price;
+        
+        // Handle promo code discount if applicable
+        if (promoCode) {
+            const { data: promo } = await adminClient
+                .from('promo_codes')
+                .select('*')
+                .eq('code', promoCode.trim().toUpperCase())
+                .eq('is_active', true)
+                .maybeSingle();
+                
+            if (promo && promo.discount_percentage > 0) {
+                const discountAmount = Math.floor(amountPaise * (promo.discount_percentage / 100));
+                amountPaise -= discountAmount;
+            }
+        }
+
+        const options = {
+            amount: amountPaise,
+            currency: 'INR',
+            receipt: `rcpt_${req.user.id.substring(0, 8)}_${Date.now().toString(36)}`
+        };
+
+        const order = await razorpayInstance.orders.create(options);
+        
+        res.status(200).json({ 
+            success: true, 
+            orderId: order.id,
+            amount: order.amount,
+            currency: order.currency,
+            connects: pkg.connects + (pkg.connects_bonus || 0),
+            razorpayKeyId: process.env.RAZORPAY_KEY_ID
+        });
+    } catch (error) {
+        logger.error('[Connects] Create Payment Intent Error:', error);
+        next(error);
+    }
+};
+
+exports.confirmPayment = async (req, res, next) => {
+    try {
+        const userId = req.user.id;
+        const { 
+            razorpay_order_id, 
+            razorpay_payment_id, 
+            razorpay_signature,
+            packageId
+        } = req.body;
+
+        const pkg = CONNECT_PACKAGES.find(p => p.id === packageId);
+        if (!pkg) {
+            return res.status(400).json({ success: false, message: "Invalid package" });
+        }
+
+        const body = razorpay_order_id + "|" + razorpay_payment_id;
+        const expectedSignature = crypto
+            .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+            .update(body.toString())
+            .digest('hex');
+
+        if (expectedSignature !== razorpay_signature) {
+            return res.status(400).json({ success: false, message: "Invalid payment signature" });
+        }
+
+        // Add connects
+        const totalConnects = pkg.connects + (pkg.connects_bonus || 0);
+        await connectsService.creditConnects(
+            userId, 
+            totalConnects, 
+            'purchase', 
+            null, 
+            { package: pkg.id, payment_id: razorpay_payment_id }
+        );
+
+        res.status(200).json({ 
+            success: true, 
+            message: `Successfully added ${totalConnects} connects!` 
+        });
+    } catch (error) {
+        logger.error('[Connects] Confirm Payment Error:', error);
+        next(error);
+    }
+};

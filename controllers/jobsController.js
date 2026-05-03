@@ -214,11 +214,10 @@ exports.getAllJobs = async (req, res, next) => {
         // Fetch client profiles to enrich job data
         const clientIds = [...new Set(jobs.map(j => j.client_id).filter(Boolean))];
         let profileMap = {};
-
         if (clientIds.length > 0) {
             const { data: profiles } = await supabase
                 .from('profiles')
-                .select('user_id, name, company_name, avatar_url')
+                .select('user_id, name, company_name, avatar_url, country, location')
                 .in('user_id', clientIds);
 
 
@@ -290,7 +289,7 @@ exports.getJobById = async (req, res, next) => {
                 id, title, description, category, skills, budget_type, 
                 budget_amount, experience_level, duration, status, job_mode,
                 created_at, client_id, attachments, bid_deadline, is_bidding_open,
-                client:profiles(name, company_name, avatar_url, country), 
+                client:profiles(name, company_name, avatar_url, country, location), 
                 proposals(id, freelancer_id, proposed_rate, status, role_id),
                 roles:job_roles(*)
             `)
@@ -334,6 +333,10 @@ exports.getJobById = async (req, res, next) => {
         const enrichedData = {
             ...data,
             proposal_count: proposalCount,
+            client: data.client ? {
+                ...data.client,
+                country: data.client.country || data.client.location?.split(',').pop()?.trim() || null
+            } : null,
             client_stats: {
                 total_posted: totalPosted,
                 total_hires: totalHires,
@@ -572,7 +575,7 @@ exports.findWork = async (req, res, next) => {
         const clientIds = [...new Set((jobs || []).map(j => j.client_id).filter(Boolean))];
         let profileMap = {};
         if (clientIds.length) {
-            const { data: profiles } = await adminClient.from('profiles').select('user_id, name, avatar_url, company_name').in('user_id', clientIds);
+            const { data: profiles } = await adminClient.from('profiles').select('user_id, name, avatar_url, company_name, country, location').in('user_id', clientIds);
             profileMap = Object.fromEntries((profiles || []).map(p => [p.user_id, p]));
 
         }
@@ -620,14 +623,24 @@ exports.searchJobs = async (req, res, next) => {
             `)
             .eq('is_bidding_open', true)
             .in('status', ['OPEN', 'IN_PROGRESS'])
-
-
             .or(`title.ilike.%${q}%,description.ilike.%${q}%,skills::text.ilike.%${q}%,category.ilike.%${q}%`)
             .order('created_at', { ascending: false })
             .limit(20);
             
         if (error) throw error;
-        res.status(200).json({ success: true, data });
+
+        // Fetch client profiles
+        const adminClient = require('../supabase/adminClient');
+        const clientIds = [...new Set((data || []).map(j => j.client_id).filter(Boolean))];
+        let profileMap = {};
+        if (clientIds.length) {
+            const { data: profiles } = await adminClient.from('profiles').select('user_id, name, avatar_url, company_name, country, location').in('user_id', clientIds);
+            profileMap = Object.fromEntries((profiles || []).map(p => [p.user_id, p]));
+        }
+
+        const enriched = (data || []).map(job => ({ ...job, client: profileMap[job.client_id] || null }));
+
+        res.status(200).json({ success: true, data: enriched });
     } catch (err) {
         next(err);
     }
