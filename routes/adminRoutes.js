@@ -64,8 +64,9 @@ router.get('/logs/summary', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMI
 
 // Dashboard Analytics Routes
 // ==========================================
-router.get('/analytics/overview', protectAdmin, adminAnalyticsController.getDashboardOverview);
-router.get('/analytics/activity', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminAnalyticsController.getAdminActivityStats);
+router.get('/analytics/overview', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN, ADMIN_ROLES.FINANCE_ADMIN), adminAnalyticsController.getDashboardOverview);
+router.get('/analytics/activity', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminAnalyticsController.getPlatformActivity);
+router.get('/analytics/stats', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminAnalyticsController.getAdminActivityStats);
 
 // Announcements analytics (called by OffersPage as /api/admin/announcements/analytics)
 router.get('/announcements/analytics', protectAdmin, announcementsController.getAnalytics);
@@ -76,6 +77,7 @@ router.get('/announcements/analytics', protectAdmin, announcementsController.get
 router.get('/users', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminUserController.getAllUsers);
 router.put('/users/:id/toggle-status', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminUserController.toggleUserStatus);
 router.post('/users/:id/reset-password', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminUserController.resetUserPassword);
+router.post('/users', protectAdmin, authorizeAdmin(ADMIN_ROLES.SUPER_ADMIN), adminUserController.createUser);
 router.delete('/users/:id', protectAdmin, authorizeAdmin(ADMIN_ROLES.SUPER_ADMIN), adminUserController.deleteUser);
 
 // Verification routes (legacy)
@@ -94,8 +96,11 @@ router.post('/verifications/send-reminder', protectAdmin, authorizeAdmin(ADMIN_R
 // ==========================================
 const withdrawalsController = require('../controllers/withdrawalsController');
 
+// --- Finance & Revenue ---
+router.get('/revenue/overview', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN, ADMIN_ROLES.FINANCE_ADMIN), adminFinanceController.getRevenueOverview);
 router.get('/withdrawals', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), withdrawalsController.adminGetWithdrawals);
 router.put('/withdrawals/:id', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), withdrawalsController.adminProcessWithdrawal);
+router.post('/refund', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminPaymentController.issueRefund);
 router.get('/settings/platform', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminFinanceController.getPlatformSettings);
 router.put('/settings/commission', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminFinanceController.updateCommission);
 

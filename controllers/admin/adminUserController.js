@@ -214,3 +214,59 @@ exports.deleteUser = async (req, res, next) => {
         next(error);
     }
 };
+
+exports.createUser = async (req, res, next) => {
+    try {
+        const { email, password, name, role } = req.body;
+
+        if (!email || !password || !name || !role) {
+            return res.status(400).json({ success: false, message: 'Missing required fields' });
+        }
+
+        // 1. Create user in Auth
+        const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
+            email,
+            password,
+            email_confirm: true,
+            user_metadata: { name, role: role.toUpperCase() }
+        });
+
+        if (authError) throw authError;
+
+        // 2. Create profile in public.profiles (if trigger didn't handle it or to be safe)
+        // Check if profile exists
+        const { data: existingProfile } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('user_id', authUser.user.id)
+            .single();
+
+        if (!existingProfile) {
+            const { error: profileError } = await supabase
+                .from('profiles')
+                .insert([{
+                    user_id: authUser.user.id,
+                    email,
+                    name,
+                    role: role.toUpperCase(),
+                    is_verified: true // Admin created users are verified by default
+                }]);
+            
+            if (profileError) {
+                // Cleanup auth user if profile creation fails
+                await supabase.auth.admin.deleteUser(authUser.user.id);
+                throw profileError;
+            }
+        }
+
+        await logAction(req.user.id, 'USER_CREATE', authUser.user.id, `Created new ${role} user: ${email}`);
+
+        res.status(201).json({
+            success: true,
+            message: 'User created successfully',
+            data: authUser.user
+        });
+    } catch (error) {
+        next(error);
+    }
+};

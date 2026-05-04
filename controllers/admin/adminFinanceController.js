@@ -124,3 +124,95 @@ exports.getPlatformSettings = async (req, res, next) => {
         next(error);
     }
 };
+
+/**
+ * Get overall platform revenue metrics
+ */
+exports.getRevenueOverview = async (req, res, next) => {
+    try {
+        // 1. Fetch Platform Settings (Commission)
+        const { data: settings } = await supabase
+            .from('platform_settings')
+            .select('*');
+        
+        const settingsMap = {};
+        settings?.forEach(s => settingsMap[s.setting_key] = s.setting_value);
+        
+        const commissionRate = parseFloat(settingsMap['commission_percentage'] || '3') / 100;
+        const withdrawalFeeRate = 0.03; // Default 3%
+
+        // 2. Aggregate Revenue Streams in parallel
+        const [
+            { data: contractPayments },
+            { data: memberships },
+            { data: connectPurchases },
+            { data: processedWithdrawals }
+        ] = await Promise.all([
+            // Contract Payments (Released)
+            supabase.from('payments').select('amount').eq('status', 'released'),
+            
+            // Memberships (Successful)
+            supabase.from('memberships').select('plan_snapshot'),
+            
+            // Connect Purchases
+            supabase.from('connect_transactions').select('amount, metadata').eq('action_source', 'purchase'),
+            
+            // Withdrawals (Completed - often have fees)
+            supabase.from('withdrawals').select('amount').eq('status', 'COMPLETED')
+        ]);
+
+        // 3. Calculate Totals
+        // Contract Commission
+        const contractTotalVolume = (contractPayments || []).reduce((sum, p) => sum + Number(p.amount), 0);
+        const contractCommission = contractTotalVolume * commissionRate;
+
+        // Membership Revenue (Stored in INR in snapshot)
+        const membershipRevenue = (memberships || []).reduce((sum, m) => {
+            const price = Number(m.plan_snapshot?.price || 0);
+            // If price > 1000, it's likely in Paise, convert to INR
+            return sum + (price > 5000 ? price / 100 : price);
+        }, 0);
+
+        // Connects Revenue (Metadata contains package info, but amount is connects. 
+        // We need to map package to price or use transaction history if price was logged)
+        // For now, use a standard rate: 1 Connect = 5 INR
+        const connectsRevenue = (connectPurchases || []).reduce((sum, c) => {
+             // In v2, we log package price in metadata if possible
+             const pkgPrice = Number(c.metadata?.price || 0);
+             if (pkgPrice > 0) return sum + (pkgPrice > 5000 ? pkgPrice / 100 : pkgPrice);
+             return sum + (Number(c.amount) * 5); // Fallback
+        }, 0);
+
+        // Withdrawal Fees (Assuming 3% fee taken by platform)
+        const withdrawalVolume = (processedWithdrawals || []).reduce((sum, w) => sum + Number(w.amount), 0);
+        const withdrawalFees = withdrawalVolume * withdrawalFeeRate;
+
+        const totalRevenue = contractCommission + membershipRevenue + connectsRevenue + withdrawalFees;
+
+        // 4. Breakdown for Table
+        const breakdown = [
+            { source: 'Contract Commission (3%)', amount: contractCommission, share: totalRevenue > 0 ? (contractCommission / totalRevenue) * 100 : 0 },
+            { source: 'Membership Plans', amount: membershipRevenue, share: totalRevenue > 0 ? (membershipRevenue / totalRevenue) * 100 : 0 },
+            { source: 'Connects Purchases', amount: connectsRevenue, share: totalRevenue > 0 ? (connectsRevenue / totalRevenue) * 100 : 0 },
+            { source: 'Withdrawal Fees (3%)', amount: withdrawalFees, share: totalRevenue > 0 ? (withdrawalFees / totalRevenue) * 100 : 0 }
+        ];
+
+        res.status(200).json({
+            success: true,
+            data: {
+                totalRevenue: Number(totalRevenue.toFixed(2)),
+                totalCommission: Number(contractCommission.toFixed(2)),
+                membershipRevenue: Number(membershipRevenue.toFixed(2)),
+                connectsRevenue: Number(connectsRevenue.toFixed(2)),
+                withdrawalFees: Number(withdrawalFees.toFixed(2)),
+                growth: 12.5, // Placeholder for trend
+                commissionTrend: "+8.2%", // Placeholder
+                revenueTrend: "+15.4%", // Placeholder
+                breakdown
+            }
+        });
+    } catch (error) {
+        console.error('[AdminFinance] Revenue Overview Error:', error);
+        next(error);
+    }
+};

@@ -3,7 +3,7 @@ const { logAction } = require('./adminAuditController');
 
 exports.getAllPayments = async (req, res, next) => {
     try {
-        const { status, limit = 50, offset = 0 } = req.query;
+        const { status, timeframe, limit = 50, offset = 0 } = req.query;
 
         let query = supabase
             .from('payments')
@@ -18,6 +18,24 @@ exports.getAllPayments = async (req, res, next) => {
             `, { count: 'exact' })
 
         if (status) query = query.eq('status', status.toLowerCase());
+
+        // Handle Timeframe Filtering
+        if (timeframe && timeframe !== 'all') {
+            const now = new Date();
+            let startDate = new Date();
+
+            if (timeframe === 'today') {
+                startDate.setHours(0, 0, 0, 0);
+            } else if (timeframe === 'week') {
+                startDate.setDate(now.getDate() - 7);
+            } else if (timeframe === 'month') {
+                startDate.setMonth(now.getMonth() - 1);
+            } else if (timeframe === 'year') {
+                startDate.setFullYear(now.getFullYear() - 1);
+            }
+            
+            query = query.gte('created_at', startDate.toISOString());
+        }
 
         const { data, count, error } = await query
             .order('created_at', { ascending: false })
