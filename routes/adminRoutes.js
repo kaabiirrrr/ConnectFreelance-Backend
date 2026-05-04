@@ -116,6 +116,10 @@ router.get('/announcements', protectAdmin, adminGeneralController.getAnnouncemen
 // Fraud Monitoring
 // ==========================================
 router.get('/fraud/suspicious-users', protectAdmin, adminGeneralController.getSuspiciousUsers);
+router.get('/fraud/user-timeline/:userId', protectAdmin, adminGeneralController.getUserFraudTimeline);
+router.post('/fraud/mark-fraud/:userId', protectAdmin, adminGeneralController.markUserAsFraud);
+router.post('/fraud/freeze/:userId', protectAdmin, adminGeneralController.freezeUserAccount);
+router.post('/fraud/clear/:userId', protectAdmin, adminGeneralController.clearFraudFlag);
 
 // ==========================================
 // Job & Contract Management
