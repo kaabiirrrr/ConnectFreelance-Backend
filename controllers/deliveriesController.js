@@ -2,6 +2,7 @@ const adminClient = require('../supabase/adminClient');
 const logger = require('../utils/logger');
 const deliveryService = require('../services/deliveryService');
 const relationshipService = require('../services/relationshipService');
+const ReputationService = require('../services/ReputationService');
 
 /**
  * GET UPLOAD URL
@@ -204,6 +205,10 @@ exports.approveWork = async (req, res, next) => {
         relationshipService.syncRelationshipStats(delivery.client_id, delivery.freelancer_id).catch(err => {
             logger.error('[RelationshipSync] Failed in approveWork', err);
         });
+
+        // 5. Recalculate Global Reputation Scores
+        ReputationService.recalculateScore(delivery.client_id).catch(() => {});
+        ReputationService.recalculateScore(delivery.freelancer_id).catch(() => {});
 
         // 5. Notification
         await deliveryService.emitDeliveryEvent('APPROVED', { delivery: data, contract: delivery.contracts });

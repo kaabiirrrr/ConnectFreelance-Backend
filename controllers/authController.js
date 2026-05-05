@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const { sendVerificationLinkEmail } = require('../utils/emailService');
 const logger = require('../utils/logger');
 const connectsService = require('../services/connectsService');
+const TrustGraphService = require('../services/TrustGraphService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -159,6 +160,11 @@ exports.register = async (req, res, next) => {
             message: 'Registration successful! Please check your email to verify your account.',
             data: { user: { id: user.id, email: user.email, name, role } }
         });
+
+        // Background: Update behavioral signals
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        TrustGraphService.updateSignals(user.id, { ip });
+
     } catch (error) {
         next(error);
     }
@@ -319,6 +325,11 @@ exports.login = async (req, res, next) => {
             },
             message: 'Login successful'
         });
+
+        // Background: Update behavioral signals
+        const { deviceId } = req.body;
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        TrustGraphService.updateSignals(userId, { deviceId, ip });
 
     } catch (error) {
         logger.error(`[Login][${traceId}] FATAL:`, error);

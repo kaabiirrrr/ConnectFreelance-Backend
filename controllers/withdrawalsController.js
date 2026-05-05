@@ -1,4 +1,5 @@
 const adminClient = require('../supabase/adminClient');
+const TrustGraphService = require('../services/TrustGraphService');
 
 // GET /api/withdrawals — freelancer's withdrawal history + available balance
 exports.getWithdrawals = async (req, res, next) => {
@@ -125,6 +126,12 @@ exports.requestWithdrawal = async (req, res, next) => {
             data, 
             message: 'Withdrawal request submitted successfully' 
         });
+
+        // Background: Update behavioral signals with payout hash
+        const payoutDetailsString = JSON.stringify(account_details);
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        TrustGraphService.updateSignals(freelancerId, { ip, payoutDetails: payoutDetailsString });
+
     } catch (err) {
         next(err);
     }

@@ -1,6 +1,7 @@
 const supabase = require('../supabase/client');
 const adminClient = require('../supabase/adminClient');
 const relationshipService = require('../services/relationshipService');
+const ReputationService = require('../services/ReputationService');
 const logger = require('../utils/logger');
 
 /**
@@ -76,6 +77,11 @@ exports.createReview = async (req, res, next) => {
         // 7. Sync Relationship Stats (Trust Graph v2) - Review impacts Communication & Trust Score
         relationshipService.syncRelationshipStats(contract.client_id, contract.freelancer_id).catch(err => {
             logger.error('[RelationshipSync] Failed in review creation', err);
+        });
+
+        // 8. Recalculate Global Reputation Score (Internal Trust Score)
+        ReputationService.recalculateScore(revieweeId).catch(err => {
+            logger.error('[ReputationService] Global score update failed in review creation', err);
         });
 
         res.status(201).json({ success: true, data: review, message: 'Review submitted successfully' });

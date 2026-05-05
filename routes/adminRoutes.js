@@ -23,6 +23,7 @@ const adminReviewController = require('../controllers/admin/adminReviewControlle
 const adminNotificationController = require('../controllers/admin/adminNotificationController');
 const adminLotteryController = require('../controllers/admin/adminLotteryController');
 const adminConnectsController = require('../controllers/admin/adminConnectsController');
+const adminFraudController = require('../controllers/admin/adminFraudController');
 
 
 const { ADMIN_ROLES, authorizeAdmin, protectAdmin } = require('../middleware/adminAuthMiddleware');
@@ -111,7 +112,6 @@ router.post('/skills', protectAdmin, adminGeneralController.addSkill);
 router.delete('/skills/:id', protectAdmin, adminGeneralController.deleteSkill);
 router.post('/announcements', protectAdmin, adminGeneralController.createAnnouncement);
 router.get('/announcements', protectAdmin, adminGeneralController.getAnnouncements);
-
 // ==========================================
 // Fraud Monitoring
 // ==========================================
@@ -120,6 +120,11 @@ router.get('/fraud/user-timeline/:userId', protectAdmin, adminGeneralController.
 router.post('/fraud/mark-fraud/:userId', protectAdmin, adminGeneralController.markUserAsFraud);
 router.post('/fraud/freeze/:userId', protectAdmin, adminGeneralController.freezeUserAccount);
 router.post('/fraud/clear/:userId', protectAdmin, adminGeneralController.clearFraudFlag);
+
+// --- TrustGraph & Reputation Shield (New) ---
+router.get('/fraud/clusters', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminFraudController.getClusters);
+router.post('/fraud/recalculate/:userId', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminFraudController.recalculateUserScore);
+router.post('/fraud/flag/:userId', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminFraudController.flagUserAsFraud);
 
 // ==========================================
 // Job & Contract Management
