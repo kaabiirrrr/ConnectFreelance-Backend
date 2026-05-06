@@ -300,7 +300,7 @@ exports.login = async (req, res, next) => {
         // 4. Membership Lookup (Aligned with Master Economy Schema)
         const { data: membership } = await adminClient
             .from('memberships')
-            .select('plan_id, status, end_date')
+            .select('plan_id, status, end_date, plan_snapshot, plan:membership_plans(name)')
             .eq('user_id', userId)
             .eq('status', 'ACTIVE')
             .maybeSingle();
@@ -806,7 +806,7 @@ exports.verifySession = async (req, res, next) => {
             // Membership Check (Robust schema-agnostic approach)
             const { data: mData } = await adminClient
                 .from('memberships')
-                .select('status, membership_plans(name)')
+                .select('status, plan_snapshot, plan:membership_plans(name)')
                 .eq('user_id', userId)
                 .eq('status', 'ACTIVE')
                 .maybeSingle();
@@ -814,7 +814,7 @@ exports.verifySession = async (req, res, next) => {
 
             // Economy Sync (Non-blocking)
             if (connectsService && connectsService.handleMonthlyReset) {
-                const planName = membership?.membership_plans?.name || 'FREE';
+                const planName = membership?.plan?.name || membership?.plan_snapshot?.name || 'FREE';
                 connectsService.handleMonthlyReset(userId, planName).catch(e => logger.warn('[VerifySession] Economy sync failed quietly:', e.message));
             }
         } catch (backgroundErr) {
