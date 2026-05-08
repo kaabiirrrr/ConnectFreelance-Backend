@@ -637,7 +637,7 @@ exports.getAllFreelancers = async (req, res, next) => {
 
         let query = adminClient
             .from('profiles')
-            .select('user_id, name, avatar_url, title, bio, skills, hourly_rate, step_data, is_verified, category, rating, profile_completed, has_availability_badge, created_at', { count: 'exact' })
+            .select('user_id, name, avatar_url, title, bio, skills, hourly_rate, step_data, is_verified, category, rating, reliability_score, profile_completed, has_availability_badge, created_at', { count: 'exact' })
             .eq('role', 'FREELANCER');
 
         if (category) {
@@ -720,7 +720,7 @@ exports.getPublicProfile = async (req, res, next) => {
             .select(`
                 id:user_id, user_id, name, title, bio, avatar_url, role, 
                 skills, hourly_rate, location, country, city,
-                experience, portfolio, rating, is_verified, 
+                experience, portfolio, rating, reliability_score, is_verified, 
                 profile_completed, profile_views, search_presence,
                 has_availability_badge, created_at,
                 is_banned, is_restricted, warning_count,

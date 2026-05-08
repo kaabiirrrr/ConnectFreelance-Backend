@@ -132,7 +132,7 @@ exports.getBalance = async (req, res, next) => {
         let wallet = null;
         const { data, error } = await adminClient
             .from('wallets')
-            .select('available_balance, pending_balance')
+            .select('available_balance, pending_balance, is_sandbox')
             .eq('user_id', userId)
             .maybeSingle();
 
@@ -142,8 +142,8 @@ exports.getBalance = async (req, res, next) => {
         if (!wallet) {
             const { data: newWallet } = await adminClient
                 .from('wallets')
-                .insert([{ user_id: userId, available_balance: 10000, pending_balance: 0 }])
-                .select('available_balance, pending_balance')
+                .insert([{ user_id: userId, available_balance: 10000, pending_balance: 0, is_sandbox: true }])
+                .select('available_balance, pending_balance, is_sandbox')
                 .single();
             wallet = newWallet;
         }
@@ -152,7 +152,8 @@ exports.getBalance = async (req, res, next) => {
             success: true,
             data: {
                 balance: wallet ? parseFloat(wallet.available_balance) : 10000,
-                pending_balance: wallet ? parseFloat(wallet.pending_balance) : 0
+                pending_balance: wallet ? parseFloat(wallet.pending_balance) : 0,
+                is_sandbox: wallet ? wallet.is_sandbox : true
             }
         });
     } catch (error) {

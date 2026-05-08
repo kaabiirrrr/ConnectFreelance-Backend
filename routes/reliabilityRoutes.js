@@ -28,7 +28,7 @@ router.get('/:id/reliability', async (req, res) => {
         const hoursSinceUpdate = (now - lastUpdated) / (1000 * 60 * 60);
 
         let finalData = {
-            score: profile.reliability_score || 100,
+            score: profile.reliability_score ?? 100,
             insight: profile.ai_insight,
             stats: null, // Basic stats not stored in profile, only in history or calculated
             isNew: false,

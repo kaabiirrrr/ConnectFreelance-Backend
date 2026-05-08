@@ -110,8 +110,8 @@ exports.listDirectContracts = async (req, res, next) => {
             .from('contracts')
             .select(`
                 *,
-                client:client_id(id, profiles(name, avatar_url)),
-                freelancer:freelancer_id(id, profiles(name, avatar_url, title))
+                client:client_id!contracts_client_id_profiles_fkey(name, avatar_url),
+                freelancer:freelancer_id!contracts_freelancer_id_profiles_fkey(name, avatar_url, title)
             `)
             .eq(roleField, userId)
             .eq('is_direct', true)
@@ -155,8 +155,8 @@ exports.getDirectContract = async (req, res, next) => {
             .from('contracts')
             .select(`
                 *,
-                client:client_id(id, profiles(name, avatar_url, company_name)),
-                freelancer:freelancer_id(id, profiles(name, avatar_url, title, hourly_rate))
+                client:client_id!contracts_client_id_profiles_fkey(name, avatar_url, company_name),
+                freelancer:freelancer_id!contracts_freelancer_id_profiles_fkey(name, avatar_url, title, hourly_rate)
             `)
             .eq('id', id)
             .eq('is_direct', true)
