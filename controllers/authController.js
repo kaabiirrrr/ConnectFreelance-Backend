@@ -246,7 +246,7 @@ exports.login = async (req, res, next) => {
         // 3. Profile Lookup & Creation
         const { data: profile, error: profileError } = await adminClient
             .from('profiles')
-            .select('id:user_id, user_id, email, name, avatar_url, role, title, is_email_verified, profile_completed, profile_completion_percentage, onboarding_step, is_client_profile_complete')
+            .select('id:user_id, user_id, email, name, avatar_url, role, title, bio, location, skills, hourly_rate, step_data, is_email_verified, profile_completed, profile_completion_percentage, onboarding_step, is_client_profile_complete')
             .eq('user_id', userId)
             .maybeSingle();
 
@@ -279,7 +279,7 @@ exports.login = async (req, res, next) => {
                     role: role || authData.user.user_metadata?.role || 'CLIENT', // Default to CLIENT if no role found
                     is_email_verified: isEmailVerifiedInAuth
                 }])
-                .select('id:user_id, user_id, email, name, avatar_url, role, title, is_email_verified, profile_completed, profile_completion_percentage, onboarding_step, is_client_profile_complete')
+                .select('id:user_id, user_id, email, name, avatar_url, role, title, bio, location, skills, hourly_rate, step_data, is_email_verified, profile_completed, profile_completion_percentage, onboarding_step, is_client_profile_complete')
                 .single();
             
             if (syncError) throw syncError;
@@ -646,7 +646,7 @@ exports.syncOAuthUser = async (req, res, next) => {
 
         let { data: profile, error: profileError } = await adminClient
             .from('profiles')
-            .select('id:user_id, user_id, email, name, avatar_url, role, title, is_email_verified, profile_completed, profile_completion_percentage, onboarding_step, is_client_profile_complete')
+            .select('id:user_id, user_id, email, name, avatar_url, role, title, bio, location, skills, hourly_rate, step_data, is_email_verified, profile_completed, profile_completion_percentage, onboarding_step, is_client_profile_complete')
             .eq('user_id', user.id)
             .maybeSingle();
 
@@ -686,7 +686,7 @@ exports.syncOAuthUser = async (req, res, next) => {
             const { data: newProfile, error: createError } = await adminClient
                 .from('profiles')
                 .upsert([profileData])
-                .select('id:user_id, user_id, email, name, avatar_url, role, title, is_email_verified, profile_completed, profile_completion_percentage, onboarding_step, is_client_profile_complete')
+                .select('id:user_id, user_id, email, name, avatar_url, role, title, bio, location, skills, hourly_rate, step_data, is_email_verified, profile_completed, profile_completion_percentage, onboarding_step, is_client_profile_complete')
                 .single();
 
             if (createError) {
@@ -702,7 +702,7 @@ exports.syncOAuthUser = async (req, res, next) => {
                 .from('profiles')
                 .update({ role: authoritativeRole })
                 .eq('user_id', user.id)
-                .select('id:user_id, user_id, email, name, avatar_url, role, title, is_email_verified, profile_completed, profile_completion_percentage, onboarding_step, is_client_profile_complete')
+                .select('id:user_id, user_id, email, name, avatar_url, role, title, bio, location, skills, hourly_rate, step_data, is_email_verified, profile_completed, profile_completion_percentage, onboarding_step, is_client_profile_complete')
                 .single();
             profile = updatedProfile;
 
@@ -749,7 +749,7 @@ exports.updateRole = async (req, res, next) => {
             .from('profiles')
             .update({ role })
             .eq('user_id', userId)
-            .select('id:user_id, user_id, email, name, avatar_url, role, title, is_email_verified, profile_completed, profile_completion_percentage, onboarding_step, is_client_profile_complete')
+            .select('id:user_id, user_id, email, name, avatar_url, role, title, bio, location, skills, hourly_rate, step_data, is_email_verified, profile_completed, profile_completion_percentage, onboarding_step, is_client_profile_complete')
             .single();
 
         if (error) throw error;
