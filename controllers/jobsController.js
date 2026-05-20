@@ -96,11 +96,22 @@ exports.createJob = async (req, res, next) => {
             message: status === 'DRAFT' || status === 'draft' ? 'Job saved as draft' : 'Job posted successfully' 
         });
 
+        // 🔥 Background: Score new job for matching freelancers (non-blocking)
+        if ((job.status || '').toUpperCase() === 'OPEN' && job.id) {
+            Promise.resolve().then(async () => {
+                try {
+                    const jobRecommendationService = require('../services/jobRecommendationService');
+                    await jobRecommendationService.scoreNewJobForFreelancers(job.id);
+                } catch (_) {}
+            });
+        }
+
     } catch (error) {
         logger.error('[Jobs] createJob error', error);
         next(error);
     }
 };
+
 
 
 exports.getClientJobs = async (req, res, next) => {

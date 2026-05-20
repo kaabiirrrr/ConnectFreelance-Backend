@@ -224,6 +224,7 @@ const registerRoutes = () => {
     app.use('/api/support',         require('./routes/supportRoutes'));
     app.use('/api/plans',           require('./routes/plansRoutes'));
     app.use('/api/announcements',   require('./routes/announcementsRoutes'));
+    app.use('/api/recommendations', require('./routes/recommendationRoutes'));
     console.log("[Boot] All routes registered.");
 };
 
@@ -302,10 +303,16 @@ const initCrons = () => {
         const { runReliabilityCron } = require('./scripts/reliabilityCron');
         const { runPlatformAudit } = require('./scripts/platformAuditCron');
         const { syncWithStripe } = require('./services/reconciliationService');
+        const jobRecommendationService = require('./services/jobRecommendationService');
 
         cron.schedule('0 0 * * *', () => runReliabilityCron());
         cron.schedule('0 1 * * *', () => runPlatformAudit());
         cron.schedule('0 * * * *', () => syncWithStripe());
+        // Nightly rec refresh at 2 AM IST (UTC+5:30 = 20:30 UTC previous day)
+        cron.schedule('30 20 * * *', () => {
+            logger.info('[Cron] Starting nightly recommendation refresh...');
+            jobRecommendationService.runNightlyRefresh();
+        });
         console.log("[Boot] Cron jobs scheduled.");
     }
 };

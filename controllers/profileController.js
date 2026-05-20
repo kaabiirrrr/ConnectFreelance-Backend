@@ -659,34 +659,80 @@ exports.getAllFreelancers = async (req, res, next) => {
             }
         }
 
-        const { data, error, count } = await query
+        let { data, error, count } = await query
             .order('created_at', { ascending: false })
             .range(offset, offset + limit - 1);
 
-        if (error) throw error;
+        if (error && error.code === '42703') {
+            // Fallback for missing columns (e.g. reliability_score, has_availability_badge)
+            let fbQuery = adminClient
+                .from('profiles')
+                .select('user_id, name, avatar_url, title, bio, skills, hourly_rate, step_data, is_verified, category, rating, profile_completed, created_at', { count: 'exact' })
+                .eq('role', 'FREELANCER');
+
+            if (category) fbQuery = fbQuery.eq('category', category);
+            if (skill) fbQuery = fbQuery.contains('skills', [skill]);
+            if (search) fbQuery = fbQuery.or(`name.ilike.%${search}%,title.ilike.%${search}%,bio.ilike.%${search}%`);
+            if (minRating) {
+                const ratingNum = parseFloat(minRating);
+                if (!isNaN(ratingNum)) fbQuery = fbQuery.gte('rating', ratingNum);
+            }
+
+            const fallbackRes = await fbQuery
+                .order('created_at', { ascending: false })
+                .range(offset, offset + limit - 1);
+
+            if (fallbackRes.error) throw fallbackRes.error;
+            data = fallbackRes.data;
+            count = fallbackRes.count;
+            error = null;
+        } else if (error) {
+            throw error;
+        }
 
         const totalPages = Math.ceil((count || 0) / limit);
 
         const sanitizedData = (data || []).map(f => {
+            const sd = (typeof f.step_data === 'object' && f.step_data) ? f.step_data : {};
+
             // Resolve hourly_rate: direct column → multiple step_data paths fallback
             let resolvedRate = f.hourly_rate;
             if (!resolvedRate || Number(resolvedRate) === 0) {
-                const stepRate = f.step_data?.professional_info?.rate || 
-                                f.step_data?.professional?.rate || 
-                                f.step_data?.rate;
+                const stepRate = sd.professional_info?.rate ||
+                                sd.professional?.rate ||
+                                sd.rate;
                 if (stepRate) {
                     const parsed = parseFloat(String(stepRate).replace(/[^0-9.]/g, ''));
                     if (!isNaN(parsed) && parsed > 0) resolvedRate = parsed;
                 }
             }
+
+            // Resolve experience_years from all step_data paths
+            const experience_years =
+                sd.professional_info?.experience ||
+                sd.personal_info?.experience ||
+                sd.professional?.experience ||
+                sd.experience ||
+                '';
+
+            // Resolve work_hours
+            const work_hours =
+                sd.professional_info?.work_hours ||
+                sd.professional?.work_hours ||
+                sd.work_hours ||
+                null;
+
             return {
                 ...f,
                 id: f.user_id,
                 hourly_rate: resolvedRate || null,
                 skills: Array.isArray(f.skills) ? f.skills : [],
+                experience_years,
+                work_hours,
                 step_data: undefined, // don't expose step_data to frontend
             };
         });
+
 
         // Increments search presence for all matching profiles if it's a real keyword search
         if (search && sanitizedData.length > 0) {
@@ -782,12 +828,63 @@ exports.getPublicProfile = async (req, res, next) => {
 
         res.status(200).json({
             success: true,
-            data: {
-                ...profile,
-                skills: Array.isArray(profile.skills) ? profile.skills : [],
-                reviews
-            }
+            data: (() => {
+                const sd = (typeof profile.step_data === 'object' && profile.step_data) ? profile.step_data : {};
+
+                // ── Resolve experience_years from all wizard step paths ──────────
+                const experience_years =
+                    sd.professional_info?.experience ||
+                    sd.personal_info?.experience ||
+                    sd.professional?.experience ||
+                    sd.experience ||
+                    '';
+
+                // ── Resolve work_hours from wizard ───────────────────────────────
+                const work_hours =
+                    sd.professional_info?.work_hours ||
+                    sd.professional?.work_hours ||
+                    sd.work_hours ||
+                    null;
+
+                // ── Resolve hourly_rate: column first, then all step_data paths ──
+                let resolvedRate = profile.hourly_rate;
+                if (!resolvedRate || Number(resolvedRate) === 0) {
+                    const stepRate =
+                        sd.professional_info?.rate ||
+                        sd.professional?.rate ||
+                        sd.rate;
+                    if (stepRate) {
+                        const parsed = parseFloat(String(stepRate).replace(/[^0-9.]/g, ''));
+                        if (!isNaN(parsed) && parsed > 0) resolvedRate = parsed;
+                    }
+                }
+
+                // ── Resolve work history (experience array) ──────────────────────
+                // The `experience` column stores JSONB work history.
+                // Wizard may store it under step_data.work_history or step_data.experience
+                let workHistory = [];
+                if (Array.isArray(profile.experience) && profile.experience.length > 0) {
+                    workHistory = profile.experience;
+                } else if (Array.isArray(sd.work_history) && sd.work_history.length > 0) {
+                    workHistory = sd.work_history;
+                } else if (Array.isArray(sd.experience) && sd.experience.length > 0) {
+                    workHistory = sd.experience;
+                }
+
+                return {
+                    ...profile,
+                    skills: Array.isArray(profile.skills) ? profile.skills : [],
+                    experience: workHistory,
+                    experience_years,
+                    work_hours,
+                    hourly_rate: resolvedRate || 0,
+                    reviews,
+                    // strip raw step_data from public response
+                    step_data: undefined,
+                };
+            })()
         });
+
     } catch (error) {
         next(error);
     }

@@ -136,6 +136,43 @@ class ConnectsService {
     }
 
     /**
+     * DYNAMIC CONNECT COST — AI Match Discount System
+     * High-match jobs cost fewer connects to apply (rewards quality applicants).
+     * Low-match jobs cost more (soft spam tax).
+     */
+    async getJobApplicationCost(jobId, freelancerId) {
+        try {
+            const settings = await this.getSettings();
+            const baseConnects = settings.proposal_submit_cost || 2;
+
+            if (!settings.is_connect_system_enabled) return baseConnects;
+
+            // Look up pre-computed match score
+            const adminClient = require('../supabase/adminClient');
+            const { data: rec } = await adminClient
+                .from('job_recommendations')
+                .select('match_score')
+                .eq('job_id', jobId)
+                .eq('freelancer_id', freelancerId)
+                .maybeSingle();
+
+            const score = rec?.match_score ?? null;
+
+            // No rec yet = neutral cost
+            if (score === null) return baseConnects;
+
+            // Apply discount / premium tiers
+            if (score >= 85) return Math.max(1, baseConnects - 4);   // ~40% discount — Excellent Match
+            if (score >= 70) return Math.max(1, baseConnects - 2);   // ~20% discount — Good Match
+            if (score < 55)  return baseConnects + 2;                 // +20% penalty  — Poor Fit (spam tax)
+            return baseConnects;                                       // 55–69: no change
+        } catch (err) {
+            logger.warn('[ConnectsService] getJobApplicationCost fallback to base cost', err.message);
+            return (await this.getSettings()).proposal_submit_cost || 2;
+        }
+    }
+
+    /**
      * ATOMIC CREDIT (Safe for Payments, Bonuses, Refunds)
      */
     async creditConnects(userId, amount, actionSource, referenceId = null, metadata = {}) {
