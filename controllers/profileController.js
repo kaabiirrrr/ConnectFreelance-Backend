@@ -85,7 +85,9 @@ exports.uploadAvatar = async (req, res, next) => {
             .from('profilephotos')
             .getPublicUrl(filePath);
 
-        const avatarUrl = urlData.publicUrl;
+        // Append a cache-bust timestamp so browsers always fetch the latest image
+        // even when the storage path is reused (upsert)
+        const avatarUrl = `${urlData.publicUrl}?v=${Date.now()}`;
 
         // Save URL to profile using adminClient for RLS bypass
         const { error: updateError } = await adminClient

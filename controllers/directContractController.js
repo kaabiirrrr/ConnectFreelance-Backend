@@ -106,32 +106,40 @@ exports.listDirectContracts = async (req, res, next) => {
         const role = req.user.role;
         const roleField = role === 'CLIENT' ? 'client_id' : 'freelancer_id';
 
-        let { data, error } = await adminClient
+        // Fetch contracts without joins first (most reliable)
+        const { data: contracts, error } = await adminClient
             .from('contracts')
-            .select(`
-                *,
-                client:client_id!contracts_client_id_profiles_fkey(name, avatar_url),
-                freelancer:freelancer_id!contracts_freelancer_id_profiles_fkey(name, avatar_url, title)
-            `)
+            .select('*')
             .eq(roleField, userId)
             .eq('is_direct', true)
             .order('created_at', { ascending: false });
 
-        // Fallback without joins if FK names don't match
-        if (error) {
-            const fallback = await adminClient
-                .from('contracts')
-                .select('*')
-                .eq(roleField, userId)
-                .eq('is_direct', true)
-                .order('created_at', { ascending: false });
-            data = fallback.data;
-            error = fallback.error;
-        }
-
         if (error) throw error;
 
-        res.status(200).json({ success: true, data: data || [] });
+        const list = contracts || [];
+
+        // Collect all unique profile IDs to fetch
+        const profileIds = [...new Set([
+            ...list.map(c => c.client_id),
+            ...list.map(c => c.freelancer_id)
+        ].filter(Boolean))];
+
+        let profileMap = {};
+        if (profileIds.length > 0) {
+            const { data: profiles } = await adminClient
+                .from('profiles')
+                .select('user_id, name, avatar_url, title, company_name')
+                .in('user_id', profileIds);
+            (profiles || []).forEach(p => { profileMap[p.user_id] = p; });
+        }
+
+        const enriched = list.map(c => ({
+            ...c,
+            client: profileMap[c.client_id] || null,
+            freelancer: profileMap[c.freelancer_id] || null,
+        }));
+
+        res.status(200).json({ success: true, data: enriched });
     } catch (err) {
         next(err);
     }
