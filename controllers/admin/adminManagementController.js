@@ -34,10 +34,6 @@ exports.addAdmin = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'Email and role are required' });
         }
 
-        if (!Object.values(ADMIN_ROLES).includes(role)) {
-            return res.status(400).json({ success: false, message: 'Invalid role' });
-        }
-
         if (password && password.length < 6) {
             return res.status(400).json({ 
                 success: false, 
@@ -194,8 +190,8 @@ exports.updateAdminRole = async (req, res, next) => {
         const { id } = req.params;
         const { role } = req.body;
 
-        if (!role || !Object.values(ADMIN_ROLES).includes(role)) {
-            return res.status(400).json({ success: false, message: 'Invalid role' });
+        if (!role) {
+            return res.status(400).json({ success: false, message: 'Role is required' });
         }
 
         // Prevent self-role-change (to avoid losing Super Admin status accidentally)

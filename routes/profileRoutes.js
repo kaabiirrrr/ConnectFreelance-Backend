@@ -18,6 +18,8 @@ router.get('/status', (req, res, next) => {
 router.get('/stats', protect, profileController.getFreelancerStats);
 router.put('/status', protect, profileController.updateProfileStatus);
 router.post('/verify/email/send', protect, profileController.sendVerificationEmail);
+router.post('/delete-account/send-otp', protect, profileController.sendDeleteAccountOTP);
+router.delete('/delete-account', protect, profileController.deleteAccount);
 
 // Upload routes BEFORE dynamic /:id to avoid conflicts
 router.post('/upload-avatar', protect, profileController.avatarUpload.single('avatar'), profileController.uploadAvatar);

@@ -2,7 +2,7 @@ const adminClient = require('../supabase/adminClient');
 const supabase = require('../supabase/client');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const { sendVerificationLinkEmail } = require('../utils/emailService');
+const { sendVerificationLinkEmail, sendPasswordResetEmail } = require('../utils/emailService');
 const logger = require('../utils/logger');
 const connectsService = require('../services/connectsService');
 const TrustGraphService = require('../services/TrustGraphService');
@@ -70,13 +70,18 @@ exports.register = async (req, res, next) => {
                         }]);
 
                         if (process.env.ESCROW_MODE === 'FAKE') {
-                            await adminClient.from('wallets')
-                                .upsert([{ user_id: user.id, available_balance: 10000, pending_balance: 0 }], { onConflict: 'user_id' })
-                                .catch(err => logger.error('[Register] Demo wallet seeding failed', err));
+                            try {
+                                await adminClient.from('wallets')
+                                    .upsert([{ user_id: user.id, available_balance: 10000, pending_balance: 0 }], { onConflict: 'user_id' });
+                            } catch (err) {
+                                logger.error('[Register] Demo wallet seeding failed', err);
+                            }
                         }
 
                         try {
-                            const backendUrl = process.env.BACKEND_URL || 'https://connect-backend-1-dm8d.onrender.com';
+                            const backendUrl = process.env.NODE_ENV === 'development' 
+                                ? `http://localhost:${process.env.PORT || 5001}` 
+                                : (process.env.BACKEND_URL || 'https://connect-backend-1-dm8d.onrender.com');
                             const verifyLink = `${backendUrl}/api/auth/verify-email?token=${verificationToken}&uid=${user.id}`;
                             await sendVerificationLinkEmail(email, verifyLink, name || email.split('@')[0]);
                         } catch (emailErr) {
@@ -138,15 +143,20 @@ exports.register = async (req, res, next) => {
         } else {
             // 4.1 Seed Wallet (Demo Mode)
             if (process.env.ESCROW_MODE === 'FAKE') {
-                await adminClient
-                    .from('wallets')
-                    .insert([{ user_id: user.id, available_balance: 10000, pending_balance: 0 }])
-                    .catch(err => logger.error('[Register] Demo wallet seeding failed', err));
+                try {
+                    await adminClient
+                        .from('wallets')
+                        .insert([{ user_id: user.id, available_balance: 10000, pending_balance: 0 }]);
+                } catch (err) {
+                    logger.error('[Register] Demo wallet seeding failed', err);
+                }
             }
 
             // 5. Send Verification Email
             try {
-                const backendUrl = process.env.BACKEND_URL || 'https://connect-backend-1-dm8d.onrender.com';
+                const backendUrl = process.env.NODE_ENV === 'development' 
+                    ? `http://localhost:${process.env.PORT || 5001}` 
+                    : (process.env.BACKEND_URL || 'https://connect-backend-1-dm8d.onrender.com');
                 const verifyLink = `${backendUrl}/api/auth/verify-email?token=${verificationToken}&uid=${user.id}`;
                 await sendVerificationLinkEmail(email, verifyLink, name || email.split('@')[0]);
                 logger.log(`[Register] Verification email sent to ${email}`);
@@ -438,7 +448,7 @@ exports.sendVerification = async (req, res, next) => {
 
         // 5. Send Email
         const verifyLink = `${process.env.BACKEND_URL || 'https://connect-backend-1-varc.onrender.com'}/api/auth/verify-email?token=${verificationToken}&uid=${userId}`;
-        await sendVerificationLinkEmail(email, verifyLink, updatedProfile.name || email.split('@')[0]);
+        await sendVerificationLinkEmail(email, verifyLink, updatedProfile.name || email.split('@')[0], true);
 
         res.status(200).json({
             success: true,
@@ -554,6 +564,46 @@ exports.logout = async (req, res, next) => {
         res.status(200).json({ success: true, message: 'Logged out successfully' });
     } catch (error) {
         logger.error('Logout error', error);
+        next(error);
+    }
+};
+
+exports.forgotPassword = async (req, res, next) => {
+    try {
+        const { email } = req.body;
+        const frontendUrl = process.env.FRONTEND_URL || 'https://connectfreelance.in';
+
+        // Use Admin API to generate a highly-secure recovery link without triggering Supabase's default email
+        const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+            type: 'recovery',
+            email: email,
+            options: {
+                redirectTo: `${frontendUrl}/reset-password`
+            }
+        });
+
+        if (linkError) {
+            // Log the error but don't leak enumeration to the client
+            logger.error('[ForgotPassword] Error generating recovery link:', linkError.message);
+        } else if (linkData?.properties?.action_link) {
+            // Fetch user's name to personalize the email
+            let name = email.split('@')[0];
+            try {
+                const { data: profile } = await adminClient.from('profiles').select('name').eq('email', email).maybeSingle();
+                if (profile && profile.name) name = profile.name;
+            } catch (err) {
+                logger.warn('[ForgotPassword] Failed to fetch profile name:', err.message);
+            }
+
+            // Send our beautifully branded custom email via Resend
+            await sendPasswordResetEmail(email, linkData.properties.action_link, name);
+            logger.info(`[ForgotPassword] Sent password reset email to ${email}`);
+        }
+
+        // Always return success to prevent email enumeration
+        res.status(200).json({ success: true, message: 'If an account exists, a password reset link has been sent.' });
+    } catch (error) {
+        logger.error('[ForgotPassword] FATAL:', error);
         next(error);
     }
 };
@@ -715,7 +765,7 @@ exports.syncOAuthUser = async (req, res, next) => {
         // 3. Fetch Membership (Consistency check for BuyConnects / Pro status)
         const { data: membership } = await adminClient
             .from('memberships')
-            .select('plan_id, status, end_date')
+            .select('plan_id, status, end_date, plan_snapshot, plan:membership_plans(name)')
             .eq('user_id', user.id)
             .eq('status', 'ACTIVE')
             .maybeSingle();
@@ -806,7 +856,7 @@ exports.verifySession = async (req, res, next) => {
             // Membership Check (Robust schema-agnostic approach)
             const { data: mData } = await adminClient
                 .from('memberships')
-                .select('status, plan_snapshot, plan:membership_plans(name)')
+                .select('plan_id, status, end_date, plan_snapshot, plan:membership_plans(name)')
                 .eq('user_id', userId)
                 .eq('status', 'ACTIVE')
                 .maybeSingle();
@@ -842,5 +892,45 @@ exports.verifySession = async (req, res, next) => {
     } catch (error) {
         logger.error('[VerifySession] FATAL 500:', error);
         res.status(500).json({ success: false, message: 'Authoritative verification failed' });
+    }
+};
+
+exports.resendVerification = async (req, res, next) => {
+    try {
+        const { email } = req.body;
+        if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
+
+        const { data: profile } = await adminClient.from('profiles').select('user_id, name').eq('email', email).maybeSingle();
+        if (!profile) return res.status(404).json({ success: false, message: 'User not found' });
+
+        const verificationToken = generateVerificationToken();
+        const expires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+        const { error: updateError } = await adminClient
+            .from('profiles')
+            .update({ 
+                email_token: verificationToken, 
+                otp_expires_at: expires 
+            })
+            .eq('user_id', profile.user_id);
+
+        if (updateError) {
+            logger.error('[Resend Verification] Error updating profile:', updateError);
+            return res.status(500).json({ success: false, message: 'Failed to generate token' });
+        }
+
+        const backendUrl = process.env.NODE_ENV === 'development' 
+            ? `http://localhost:${process.env.PORT || 5001}` 
+            : (process.env.BACKEND_URL || 'https://connect-backend-1-dm8d.onrender.com');
+
+        const verifyLink = `${backendUrl}/api/auth/verify-email?token=${verificationToken}&uid=${profile.user_id}`;
+
+        let name = profile.name || email.split('@')[0];
+
+        await sendVerificationLinkEmail(email, verifyLink, name, true);
+        
+        res.status(200).json({ success: true, message: 'Verification email resent successfully' });
+    } catch (err) {
+        next(err);
     }
 };

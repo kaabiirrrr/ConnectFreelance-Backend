@@ -1,5 +1,27 @@
 const adminClient = require('../supabase/adminClient');
 
+const BOOST_COST = 10; // connects required to activate profile boost
+
+// ─── Helper: ensure user has a connects wallet ────────────────────────────────
+async function ensureWallet(userId) {
+    const { data } = await adminClient
+        .from('user_connects')
+        .select('balance')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+    if (!data) {
+        // Initialize wallet with 20 free connects
+        const { data: newWallet } = await adminClient
+            .from('user_connects')
+            .insert([{ user_id: userId, balance: 20 }])
+            .select('balance')
+            .single();
+        return newWallet?.balance ?? 0;
+    }
+    return data.balance ?? 0;
+}
+
 // GET /api/promotions/my — get freelancer's promotion status
 exports.getMyPromotions = async (req, res, next) => {
     try {
@@ -15,12 +37,21 @@ exports.getMyPromotions = async (req, res, next) => {
         // Build a map of type -> promotion
         const promoMap = Object.fromEntries((data || []).map(p => [p.type, p]));
 
-        // Return structured response with defaults
         res.status(200).json({
             success: true,
             data: {
-                availability_badge: promoMap['availability_badge'] || { type: 'availability_badge', is_active: false, impressions: 0, clicks: 0 },
-                profile_boost: promoMap['profile_boost'] || { type: 'profile_boost', is_active: false, impressions: 0, clicks: 0 }
+                availability_badge: promoMap['availability_badge'] || {
+                    type: 'availability_badge',
+                    is_active: false,
+                    impressions: 0,
+                    clicks: 0
+                },
+                profile_boost: promoMap['profile_boost'] || {
+                    type: 'profile_boost',
+                    is_active: false,
+                    impressions: 0,
+                    clicks: 0
+                }
             }
         });
     } catch (err) {
@@ -36,27 +67,13 @@ exports.togglePromotion = async (req, res, next) => {
 
         const validTypes = ['availability_badge', 'profile_boost'];
         if (!validTypes.includes(type)) {
-            return res.status(400).json({ success: false, message: `Type must be one of: ${validTypes.join(', ')}` });
+            return res.status(400).json({
+                success: false,
+                message: `Type must be one of: ${validTypes.join(', ')}`
+            });
         }
 
-        // Check connects balance for profile_boost (costs connects)
-        if (type === 'profile_boost') {
-            const { data: connects } = await adminClient
-                .from('connects')
-                .select('balance')
-                .eq('freelancer_id', freelancerId)
-                .maybeSingle();
-
-            const balance = connects?.balance || 0;
-            if (balance < 10) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Profile boost requires at least 10 connects. Buy more connects to activate.'
-                });
-            }
-        }
-
-        // Get existing promotion
+        // Get existing promotion to know current state
         const { data: existing } = await adminClient
             .from('promotions')
             .select('*')
@@ -64,7 +81,20 @@ exports.togglePromotion = async (req, res, next) => {
             .eq('type', type)
             .maybeSingle();
 
-        const newActive = existing ? !existing.is_active : true;
+        const currentlyActive = existing?.is_active ?? false;
+        const newActive = !currentlyActive;
+
+        // Check connects balance for profile_boost activation
+        if (type === 'profile_boost' && newActive) {
+            const balance = await ensureWallet(freelancerId);
+            if (balance < BOOST_COST) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Profile boost requires at least ${BOOST_COST} connects. You have ${balance}. Buy more connects to activate.`
+                });
+            }
+        }
+
         const now = new Date().toISOString();
         const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
 
@@ -76,7 +106,8 @@ exports.togglePromotion = async (req, res, next) => {
                 .update({
                     is_active: newActive,
                     started_at: newActive ? now : existing.started_at,
-                    expires_at: newActive ? expires : existing.expires_at
+                    expires_at: newActive ? expires : existing.expires_at,
+                    updated_at: now
                 })
                 .eq('id', existing.id)
                 .select()
@@ -97,23 +128,66 @@ exports.togglePromotion = async (req, res, next) => {
 
         if (error) throw error;
 
-        // Deduct connects for profile_boost activation
+        // Deduct connects atomically for profile_boost activation
         if (type === 'profile_boost' && newActive) {
-            const { data: connects } = await adminClient
-                .from('connects')
-                .select('balance')
-                .eq('freelancer_id', freelancerId)
-                .maybeSingle();
+            try {
+                // Use the atomic RPC directly to deduct BOOST_COST connects
+                const { data: newBalance, error: deductErr } = await adminClient.rpc('debit_connects_atomic', {
+                    p_user_id: freelancerId,
+                    p_amount: BOOST_COST,
+                    p_action_source: 'profile_boost',
+                    p_metadata: {
+                        description: 'Profile Boost activation (30 days)',
+                        promotion_id: data?.id,
+                        source: 'profile_boost'
+                    }
+                });
 
-            if (connects) {
-                await adminClient
-                    .from('connects')
-                    .update({ balance: Math.max(0, connects.balance - 10) })
-                    .eq('freelancer_id', freelancerId);
+                if (deductErr) {
+                    // Roll back the promotion toggle
+                    if (existing) {
+                        await adminClient
+                            .from('promotions')
+                            .update({ is_active: false })
+                            .eq('id', existing.id);
+                    } else {
+                        await adminClient
+                            .from('promotions')
+                            .delete()
+                            .eq('id', data.id);
+                    }
+
+                    const isInsufficient = deductErr.message?.includes('INSUFFICIENT_CONNECTS') ||
+                        deductErr.message?.includes('insufficient');
+                    return res.status(400).json({
+                        success: false,
+                        message: isInsufficient
+                            ? `Insufficient connects. You need ${BOOST_COST} connects to activate Profile Boost.`
+                            : 'Failed to deduct connects. Please try again.'
+                    });
+                }
+            } catch (deductErr) {
+                console.error('[Promotions] Connect deduction failed:', deductErr.message);
+                // Roll back the promotion toggle
+                if (existing) {
+                    await adminClient
+                        .from('promotions')
+                        .update({ is_active: false })
+                        .eq('id', existing.id);
+                } else if (data?.id) {
+                    await adminClient
+                        .from('promotions')
+                        .delete()
+                        .eq('id', data.id);
+                }
+                return res.status(400).json({
+                    success: false,
+                    message: 'Failed to deduct connects. Please try again.'
+                });
             }
         }
 
-        // Update profile status flags based on type
+        // Update profile status flags
         const profileUpdates = {};
         if (type === 'profile_boost') {
             profileUpdates.is_featured = newActive;
@@ -152,16 +226,19 @@ exports.getPromotionStats = async (req, res, next) => {
 
         if (error) throw error;
 
-        const totalImpressions = (data || []).reduce((s, p) => s + (p.impressions || 0), 0);
-        const totalClicks = (data || []).reduce((s, p) => s + (p.clicks || 0), 0);
+        const promotions = data || [];
+        const totalImpressions = promotions.reduce((s, p) => s + (p.impressions || 0), 0);
+        const totalClicks = promotions.reduce((s, p) => s + (p.clicks || 0), 0);
 
         res.status(200).json({
             success: true,
             data: {
-                promotions: data || [],
+                promotions,
                 total_impressions: totalImpressions,
                 total_clicks: totalClicks,
-                ctr: totalImpressions > 0 ? ((totalClicks / totalImpressions) * 100).toFixed(1) : '0.0'
+                ctr: totalImpressions > 0
+                    ? ((totalClicks / totalImpressions) * 100).toFixed(1)
+                    : '0.0'
             }
         });
     } catch (err) {

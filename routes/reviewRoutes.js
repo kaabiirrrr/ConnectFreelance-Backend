@@ -11,4 +11,7 @@ router.get('/user/:id', reviewController.getUserReviews);
 // Protected: create a review (must be contract participant)
 router.post('/create', protect, validate(createReviewSchema), reviewController.createReview);
 
+// Protected: get reviews for a specific contract
+router.get('/contract/:contract_id', protect, reviewController.getContractReviews);
+
 module.exports = router;

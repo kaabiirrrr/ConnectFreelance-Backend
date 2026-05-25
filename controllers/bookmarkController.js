@@ -76,7 +76,7 @@ exports.getBookmarks = async (req, res, next) => {
                 jobs:job_id (
                     id, title, description, category, skills, budget_type,
                     budget_amount, status, created_at,
-                    client:client_id ( id, name, avatar_url, company_name, country, location )
+                    client:client_id ( id, name, avatar_url, company_name, country, location, rating, reviews_count )
                 )
             `, { count: 'exact' })
             .eq('freelancer_id', userId)
@@ -197,7 +197,7 @@ exports.getSavedJobs = async (req, res, next) => {
         if (clientIds.length > 0) {
             const { data: profiles } = await adminClient
                 .from('profiles')
-                .select('user_id, name, company_name, avatar_url, country, location')
+                .select('user_id, name, company_name, avatar_url, country, location, rating, reviews_count')
                 .in('user_id', clientIds);
             if (profiles) profiles.forEach(p => { profileMap[p.user_id] = p; });
         }

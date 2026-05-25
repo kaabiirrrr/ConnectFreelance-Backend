@@ -274,7 +274,7 @@ class JobRecommendationService {
             const jobIds = filtered.map(r => r.job_id);
             const { data: jobs } = await adminClient
                 .from('jobs')
-                .select('id, title, description, category, budget_amount, budget_type, experience_level, skills, status, is_bidding_open, created_at, client_id, proposal_count')
+                .select('id, title, description, category, budget_amount, budget_type, experience_level, skills, status, is_bidding_open, created_at, client_id, proposal_count, client:profiles(user_id, name, company_name, avatar_url, country, location, rating, reviews_count)')
                 .in('id', jobIds)
                 .eq('is_bidding_open', true)
                 .eq('status', 'OPEN');

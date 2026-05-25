@@ -24,9 +24,10 @@ const adminNotificationController = require('../controllers/admin/adminNotificat
 const adminLotteryController = require('../controllers/admin/adminLotteryController');
 const adminConnectsController = require('../controllers/admin/adminConnectsController');
 const adminFraudController = require('../controllers/admin/adminFraudController');
+const adminSalesProposalController = require('../controllers/admin/adminSalesProposalController');
 
 
-const { ADMIN_ROLES, authorizeAdmin, protectAdmin } = require('../middleware/adminAuthMiddleware');
+const { ADMIN_ROLES, ADMIN_ROLES_LIST, authorizeAdmin, protectAdmin } = require('../middleware/adminAuthMiddleware');
 
 // ==========================================
 // Auth Routes
@@ -65,9 +66,9 @@ router.get('/logs/summary', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMI
 
 // Dashboard Analytics Routes
 // ==========================================
-router.get('/analytics/overview', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN, ADMIN_ROLES.FINANCE_ADMIN), adminAnalyticsController.getDashboardOverview);
-router.get('/analytics/activity', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminAnalyticsController.getPlatformActivity);
-router.get('/analytics/stats', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminAnalyticsController.getAdminActivityStats);
+router.get('/analytics/overview', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminAnalyticsController.getDashboardOverview);
+router.get('/analytics/activity', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminAnalyticsController.getPlatformActivity);
+router.get('/analytics/stats', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminAnalyticsController.getAdminActivityStats);
 
 // Announcements analytics (called by OffersPage as /api/admin/announcements/analytics)
 router.get('/announcements/analytics', protectAdmin, announcementsController.getAnalytics);
@@ -87,10 +88,10 @@ router.put('/verification/:userId', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADM
 router.put('/freelancers/:userId/featured', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminVerificationController.toggleFeaturedStatus);
 
 // Verification routes (new — full management)
-router.get('/verifications/:role', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminVerificationController.getVerificationList);
-router.patch('/verifications/:id/approve', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminVerificationController.approveVerification);
-router.patch('/verifications/:id/reject', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminVerificationController.rejectVerification);
-router.post('/verifications/send-reminder', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminVerificationController.sendReminder);
+router.get('/verifications/:role', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN, ADMIN_ROLES.VERIFICATION_ADMIN), adminVerificationController.getVerificationList);
+router.patch('/verifications/:id/approve', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN, ADMIN_ROLES.VERIFICATION_ADMIN), adminVerificationController.approveVerification);
+router.patch('/verifications/:id/reject', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN, ADMIN_ROLES.VERIFICATION_ADMIN), adminVerificationController.rejectVerification);
+router.post('/verifications/send-reminder', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN, ADMIN_ROLES.VERIFICATION_ADMIN), adminVerificationController.sendReminder);
 
 // ==========================================
 // Finance & Withdrawals
@@ -102,7 +103,7 @@ router.get('/revenue/overview', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, 
 router.get('/withdrawals', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), withdrawalsController.adminGetWithdrawals);
 router.put('/withdrawals/:id', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), withdrawalsController.adminProcessWithdrawal);
 router.post('/refund', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminPaymentController.issueRefund);
-router.get('/settings/platform', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminFinanceController.getPlatformSettings);
+router.get('/settings/platform', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminFinanceController.getPlatformSettings);
 router.put('/settings/commission', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminFinanceController.updateCommission);
 
 // ==========================================
@@ -144,7 +145,7 @@ router.put('/contracts/:id/cancel', protectAdmin, adminContractController.cancel
 // Payments, Disputes, Reports, Notifications
 // ==========================================
 // Payment Management
-router.get('/payments', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminPaymentController.getAllPayments);
+router.get('/payments', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminPaymentController.getAllPayments);
 
 // Disputes & Reports
 router.get('/disputes', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminDisputeController.getAllDisputes);
@@ -165,6 +166,11 @@ router.post('/notifications/send', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMI
 router.get('/problems', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminProblemController.getProblems);
 router.patch('/problems/:id', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminProblemController.updateProblemStatus);
 router.delete('/problems/:id', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminProblemController.deleteProblem);
+
+// Membership Sales/Custom Proposals Management
+router.get('/sales-proposals', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminSalesProposalController.getSalesProposals);
+router.patch('/sales-proposals/:id', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminSalesProposalController.updateSalesProposalStatus);
+router.delete('/sales-proposals/:id', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminSalesProposalController.deleteSalesProposal);
 
 // FAQ Management
 router.get('/faqs', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminFaqController.getAllFAQs);
@@ -192,5 +198,15 @@ router.get('/connects/settings', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN,
 router.put('/connects/settings', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminConnectsController.updateSettings);
 router.get('/connects/analytics', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN, ADMIN_ROLES.FINANCE_ADMIN), adminConnectsController.getEconomyAnalytics);
 router.get('/connects/ledger', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN, ADMIN_ROLES.FINANCE_ADMIN), adminConnectsController.getAuditLedger);
+
+// ==========================================
+// Enterprise RBAC & IAM System
+// ==========================================
+const adminRbacController = require('../controllers/admin/adminRbacController');
+
+router.get('/rbac/permissions', protectAdmin, adminRbacController.getAllPermissions);
+router.get('/rbac/roles', protectAdmin, adminRbacController.getAllRoles);
+router.put('/rbac/roles/:id/permissions', protectAdmin, authorizeAdmin(ADMIN_ROLES.SUPER_ADMIN), adminRbacController.updateRolePermissions);
+router.get('/rbac/logs', protectAdmin, adminRbacController.getAuditLogs);
 
 module.exports = router;

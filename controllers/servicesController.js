@@ -28,7 +28,7 @@ exports.getServices = async (req, res, next) => {
 
         let query = adminClient
             .from('services')
-            .select('id, title, description, category, price, delivery_days, revisions, tags, images, orders_count, rating, freelancer_id, is_active, created_at', { count: 'exact' })
+            .select('id, title, description, category, price, delivery_days, revisions, tags, images, orders_count, rating, reviews_count, freelancer_id, is_active, created_at', { count: 'exact' })
             .eq('is_active', true);
 
         if (category) query = query.eq('category', category);
@@ -79,7 +79,7 @@ exports.getServiceById = async (req, res, next) => {
         const { id } = req.params;
         if (!UUID_REGEX.test(id)) return res.status(400).json({ success: false, message: 'Invalid service ID' });
 
-        const { data, error } = await adminClient.from('services').select('id, title, description, category, subcategory, price, delivery_days, revisions, tags, images, packages, faqs, orders_count, rating, freelancer_id, is_active, created_at').eq('id', id).maybeSingle();
+        const { data, error } = await adminClient.from('services').select('id, title, description, category, subcategory, price, delivery_days, revisions, tags, images, packages, faqs, orders_count, rating, reviews_count, freelancer_id, is_active, created_at').eq('id', id).maybeSingle();
         if (error) throw error;
         if (!data) return res.status(404).json({ success: false, message: 'Service not found' });
 

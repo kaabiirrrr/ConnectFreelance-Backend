@@ -27,6 +27,9 @@ function incrementStrikes(socketId) {
 // userId → Set<socketId>  (multi-tab support)
 const onlineUsers = new Map();
 
+// userId → boolean (user preference to show online)
+const userOnlinePreferences = new Map();
+
 // userId → timestamp of last heartbeat
 const heartbeats = new Map();
 
@@ -127,9 +130,11 @@ function initSocketIO(httpServer) {
             // ─── ENTERPRISE ENFORCEMENT: Ban/Suspension Check ─────────────
             const { data: profile } = await adminClient
                 .from('profiles')
-                .select('is_banned, is_restricted')
+                .select('is_banned, is_restricted, online_for_messages')
                 .eq('user_id', user.id)
                 .single();
+
+            socket.onlineForMessages = profile ? profile.online_for_messages !== false : true;
 
             if (profile?.is_banned) {
                 logger.error(`[Socket] Auth failed: User ${user.id} is BANNED`);
@@ -155,9 +160,70 @@ function initSocketIO(httpServer) {
         logger.log(`[Socket] User connected: ${userId}`);
 
         // Track online status
+        const isFirstSocket = !onlineUsers.has(userId) || onlineUsers.get(userId).size === 0;
         if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
         onlineUsers.get(userId).add(socket.id);
         
+        // Store online presence preference
+        const isOnlinePref = socket.onlineForMessages !== false;
+        userOnlinePreferences.set(userId, isOnlinePref);
+
+        if (isFirstSocket && isOnlinePref) {
+            // Broadcast online status to conversation partners
+            adminClient
+                .from('conversations')
+                .select('id')
+                .or(`client_id.eq.${userId},freelancer_id.eq.${userId}`)
+                .then(({ data: conversations }) => {
+                    if (conversations) {
+                        for (const conv of conversations) {
+                            io.to(`conv:${conv.id}`).emit('partner-presence', {
+                                conversationId: conv.id,
+                                userId,
+                                isOnline: true
+                            });
+                        }
+                    }
+                })
+                .catch(err => logger.error('[Socket] Connect presence broadcast error:', err));
+        }
+
+        // Toggle online event handler
+        socket.on('toggle-online', async ({ online }) => {
+            const isOnline = !!online;
+            userOnlinePreferences.set(userId, isOnline);
+
+            // Persist to DB
+            try {
+                await adminClient
+                    .from('profiles')
+                    .update({ online_for_messages: isOnline })
+                    .eq('user_id', userId);
+            } catch (err) {
+                logger.error(`[Socket] Failed to persist online_for_messages for ${userId}:`, err);
+            }
+
+            // Broadcast presence status change to all partners
+            try {
+                const { data: conversations } = await adminClient
+                    .from('conversations')
+                    .select('id')
+                    .or(`client_id.eq.${userId},freelancer_id.eq.${userId}`);
+
+                if (conversations) {
+                    for (const conv of conversations) {
+                        io.to(`conv:${conv.id}`).emit('partner-presence', {
+                            conversationId: conv.id,
+                            userId,
+                            isOnline: isOnline
+                        });
+                    }
+                }
+            } catch (err) {
+                logger.error('[Socket] toggle-online broadcast error:', err);
+            }
+        });
+
         // --- 🛡️ BANK-GRADE: PRIVACY HARDENING ---
         // io.emit('online-users', [...onlineUsers.keys()]); // REMOVED: Do not broadcast globally
 
@@ -184,7 +250,7 @@ function initSocketIO(httpServer) {
             
             if (conv) {
                 const partnerId = conv.client_id === userId ? conv.freelancer_id : conv.client_id;
-                const isOnline = onlineUsers.has(partnerId);
+                const isOnline = isUserOnline(partnerId);
                 socket.emit('partner-presence', { conversationId, partnerId, isOnline });
             }
         });
@@ -524,7 +590,28 @@ function initSocketIO(httpServer) {
                 const sockets = onlineUsers.get(userId);
                 if (sockets) {
                     sockets.delete(socket.id);
-                    if (sockets.size === 0) onlineUsers.delete(userId);
+                    if (sockets.size === 0) {
+                        onlineUsers.delete(userId);
+                        userOnlinePreferences.delete(userId);
+
+                        // Broadcast offline status to conversation partners
+                        adminClient
+                            .from('conversations')
+                            .select('id')
+                            .or(`client_id.eq.${userId},freelancer_id.eq.${userId}`)
+                            .then(({ data: conversations }) => {
+                                if (conversations) {
+                                    for (const conv of conversations) {
+                                        io.to(`conv:${conv.id}`).emit('partner-presence', {
+                                            conversationId: conv.id,
+                                            userId,
+                                            isOnline: false
+                                        });
+                                    }
+                                }
+                            })
+                            .catch(err => logger.error('[Socket] Disconnect presence broadcast error:', err));
+                    }
                 }
             }
             strikeCounts.delete(socket.id);
@@ -552,6 +639,9 @@ function getIO() {
 }
 
 function isUserOnline(userId) {
+    const pref = userOnlinePreferences.get(userId) !== false;
+    if (!pref) return false;
+
     const sockets = onlineUsers.get(userId);
     const hasSocket = sockets && sockets.size > 0;
     const lastSeen = heartbeats.get(userId);
@@ -560,7 +650,7 @@ function isUserOnline(userId) {
 }
 
 function getOnlineUsers() {
-    return [...onlineUsers.keys()];
+    return [...onlineUsers.keys()].filter(uid => isUserOnline(uid));
 }
 
 module.exports = { initSocketIO, getIO, isUserOnline, getOnlineUsers };

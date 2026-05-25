@@ -272,9 +272,20 @@ exports.confirmPayment = async (req, res, next) => {
             { package: pkg.id, payment_id: razorpay_payment_id }
         );
 
+        // Fetch updated connects balance
+        const { data: cData } = await adminClient
+            .from('user_connects')
+            .select('balance')
+            .eq('user_id', userId)
+            .maybeSingle();
+        const updatedBalance = cData?.balance ?? 0;
+
         res.status(200).json({ 
             success: true, 
-            message: `Successfully added ${totalConnects} connects!` 
+            message: `Successfully added ${totalConnects} connects!`,
+            data: {
+                balance: updatedBalance
+            }
         });
     } catch (error) {
         logger.error('[Connects] Confirm Payment Error:', error);

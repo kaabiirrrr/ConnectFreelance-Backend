@@ -142,3 +142,45 @@ exports.getUserReviews = async (req, res, next) => {
         next(error);
     }
 };
+
+/**
+ * Get reviews for a specific contract
+ * GET /api/reviews/contract/:contract_id
+ * Security: Only contract participants can view
+ */
+exports.getContractReviews = async (req, res, next) => {
+    try {
+        const { contract_id } = req.params;
+        const userId = req.user.id;
+
+        // Verify user is a participant
+        const { data: contract, error: contractError } = await adminClient
+            .from('contracts')
+            .select('client_id, freelancer_id')
+            .eq('id', contract_id)
+            .single();
+
+        if (contractError || !contract) {
+            return res.status(404).json({ success: false, message: 'Contract not found' });
+        }
+
+        if (contract.client_id !== userId && contract.freelancer_id !== userId) {
+            return res.status(403).json({ success: false, message: 'You are not a participant in this contract' });
+        }
+
+        const { data: reviews, error } = await adminClient
+            .from('reviews')
+            .select(`
+                id, rating, comment, created_at, reviewer_id, reviewee_id,
+                reviewer:reviewer_id ( user_id, name, avatar_url )
+            `)
+            .eq('contract_id', contract_id)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        res.status(200).json({ success: true, data: reviews || [] });
+    } catch (error) {
+        next(error);
+    }
+};

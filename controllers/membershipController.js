@@ -1,6 +1,7 @@
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const supabase = require('../supabase/client');
+const adminClient = require('../supabase/adminClient');
 const logger = require('../utils/logger');
 const connectsService = require('../services/connectsService');
 
@@ -23,7 +24,7 @@ const razorpay = new Razorpay({
  */
 exports.getPlans = async (req, res, next) => {
     try {
-        const { data: plans, error } = await supabase
+        const { data: plans, error } = await adminClient
             .from('membership_plans')
             .select('*, membership_features(*)')
             .eq('is_active', true)
@@ -47,7 +48,7 @@ exports.createOrder = async (req, res, next) => {
         const userId = req.user.id;
 
         // 1. Fetch Plan Details from DB
-        const { data: plan, error } = await supabase
+        const { data: plan, error } = await adminClient
             .from('membership_plans')
             .select('*')
             .eq('id', plan_id)
@@ -109,7 +110,7 @@ exports.verifyPayment = async (req, res, next) => {
         }
 
         // 2. Idempotency Check (Support Recovery from partial failures)
-        const { data: existing, error: existErr } = await supabase
+        const { data: existing, error: existErr } = await adminClient
             .from('memberships')
             .select('id, plan_id')
             .eq('order_id', razorpay_order_id)
@@ -119,7 +120,7 @@ exports.verifyPayment = async (req, res, next) => {
 
         // 3. Fetch Plan & Features for Snapshot
         const effectivePlanId = existing ? existing.plan_id : plan_id;
-        const { data: plan, error: planErr } = await supabase
+        const { data: plan, error: planErr } = await adminClient
             .from('membership_plans')
             .select('*, features:membership_features(*)')
             .eq('id', effectivePlanId)
@@ -133,12 +134,12 @@ exports.verifyPayment = async (req, res, next) => {
         // 4. Activate Membership (Only if not already done)
         if (!existing) {
             try {
-                await supabase.from('memberships').delete().eq('user_id', userId).eq('status', 'ACTIVE');
+                await adminClient.from('memberships').delete().eq('user_id', userId).eq('status', 'ACTIVE');
             } catch (delErr) {
                 logger.warn('[Membership] Pre-active cleanup warning:', delErr.message);
             }
 
-            const { error: insertErr } = await supabase.from('memberships').insert([{
+            const { error: insertErr } = await adminClient.from('memberships').insert([{
                 user_id: userId,
                 plan_id: effectivePlanId,
                 status: 'ACTIVE',
@@ -177,7 +178,7 @@ exports.verifyPayment = async (req, res, next) => {
 
         // 6. Sync Profile
         try {
-            const { error: profileErr } = await supabase.from('profiles').update({ 
+            const { error: profileErr } = await adminClient.from('profiles').update({ 
                 membership_type: plan.name, 
                 is_pro: true 
             }).eq('user_id', userId);
@@ -186,7 +187,36 @@ exports.verifyPayment = async (req, res, next) => {
             logger.error('[Membership] Profile sync exception:', syncErr.message);
         }
 
-        res.status(200).json({ success: true, message: 'Payment verified and Plan activated!' });
+        // 7. Fetch updated membership and connects balance to return to client
+        let updatedMembership = null;
+        let updatedBalance = 0;
+        try {
+            const { data: mData } = await adminClient
+                .from('memberships')
+                .select('plan_id, status, end_date, plan_snapshot, plan:membership_plans(name)')
+                .eq('user_id', userId)
+                .eq('status', 'ACTIVE')
+                .maybeSingle();
+            updatedMembership = mData;
+
+            const { data: cData } = await adminClient
+                .from('user_connects')
+                .select('balance')
+                .eq('user_id', userId)
+                .maybeSingle();
+            updatedBalance = cData?.balance ?? 0;
+        } catch (fetchErr) {
+            logger.error('[Membership] Failed to fetch updated data for response:', fetchErr.message);
+        }
+
+        res.status(200).json({ 
+            success: true, 
+            message: 'Payment verified and Plan activated!',
+            data: {
+                membership: updatedMembership,
+                balance: updatedBalance
+            }
+        });
 
     } catch (error) {
         logger.error('Verify Payment Error:', error.message, error.stack);
@@ -205,7 +235,7 @@ exports.verifyPayment = async (req, res, next) => {
  */
 exports.getCurrentMembership = async (req, res, next) => {
     try {
-        const { data: membership, error } = await supabase
+        const { data: membership, error } = await adminClient
             .from('memberships')
             .select('*, plan:membership_plans(*)')
             .eq('user_id', req.user.id)
@@ -233,3 +263,258 @@ exports.getCurrentMembership = async (req, res, next) => {
         res.status(500).json({ success: false, message: error.message });
     }
 };
+
+/**
+ * 5. CREATE SALES PROPOSAL
+ * POST /api/membership/sales-proposal
+ */
+exports.createSalesProposal = async (req, res, next) => {
+    try {
+        const { email, needs } = req.body;
+        const userId = req.user?.id;
+
+        if (!email || !needs) {
+            return res.status(400).json({ success: false, message: 'Email and organizational needs are required' });
+        }
+
+        const { data, error } = await adminClient
+            .from('membership_proposals')
+            .insert([{
+                user_id: userId || null,
+                email,
+                needs,
+                status: 'PENDING'
+            }])
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        res.status(201).json({ success: true, message: 'Custom proposal request submitted successfully', data });
+    } catch (error) {
+        logger.error('Create Sales Proposal Error:', error);
+        next(error);
+    }
+};
+
+/**
+ * 6. GET MY PROPOSALS
+ * GET /api/membership/my-proposals
+ */
+exports.getMyProposals = async (req, res, next) => {
+    try {
+        const userId = req.user.id;
+        const { data, error } = await adminClient
+            .from('membership_proposals')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        res.status(200).json({ success: true, data });
+    } catch (error) {
+        logger.error('Get My Proposals Error:', error);
+        next(error);
+    }
+};
+
+/**
+ * 7. CREATE CUSTOM ORDER
+ * POST /api/membership/create-custom-order
+ */
+exports.createCustomOrder = async (req, res, next) => {
+    try {
+        const { proposal_id } = req.body;
+        const userId = req.user.id;
+
+        if (!proposal_id) {
+            return res.status(400).json({ success: false, message: 'Proposal ID is required' });
+        }
+
+        const { data: proposal, error } = await adminClient
+            .from('membership_proposals')
+            .select('*')
+            .eq('id', proposal_id)
+            .eq('user_id', userId)
+            .single();
+
+        if (error || !proposal) {
+            return res.status(404).json({ success: false, message: 'Proposal not found' });
+        }
+
+        if (proposal.status !== 'REVIEWED') {
+            return res.status(400).json({ success: false, message: 'Proposal is not ready for payment' });
+        }
+
+        if (!proposal.custom_price || proposal.custom_price <= 0) {
+            return res.status(400).json({ success: false, message: 'Proposal does not have a valid price' });
+        }
+
+        // Create Razorpay Order (custom price in Rupees, so multiply by 100 to get Paise)
+        const priceInPaise = Math.round(Number(proposal.custom_price) * 100);
+
+        const options = {
+            amount: priceInPaise,
+            currency: "INR",
+            receipt: `receipt_custom_${Date.now()}_${userId.substring(0, 5)}`,
+            notes: {
+                user_id: userId,
+                proposal_id: proposal.id,
+                plan_name: `CUSTOM PROPOSAL`
+            }
+        };
+
+        const order = await razorpay.orders.create(options);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                order_id: order.id,
+                amount: order.amount,
+                key_id: rzpKeyId
+            }
+        });
+    } catch (error) {
+        logger.error('Create Custom Order Error:', error);
+        next(error);
+    }
+};
+
+/**
+ * 8. VERIFY CUSTOM PAYMENT
+ * POST /api/membership/verify-custom
+ */
+exports.verifyCustomPayment = async (req, res, next) => {
+    try {
+        const { razorpay_order_id, razorpay_payment_id, razorpay_signature, proposal_id } = req.body;
+        const userId = req.user.id;
+
+        logger.info(`[Membership] Verifying custom payment for user ${userId}, proposal ${proposal_id}`);
+
+        // 1. Signature check
+        const body = razorpay_order_id + "|" + razorpay_payment_id;
+        const expectedSignature = crypto
+            .createHmac('sha256', rzpKeySecret)
+            .update(body.toString())
+            .digest('hex');
+
+        if (expectedSignature !== razorpay_signature) {
+            logger.warn(`[Membership] Signature mismatch for custom order ${razorpay_order_id}`);
+            return res.status(403).json({ success: false, message: 'Invalid payment signature' });
+        }
+
+        // 2. Fetch Proposal Details
+        const { data: proposal, error: propErr } = await adminClient
+            .from('membership_proposals')
+            .select('*')
+            .eq('id', proposal_id)
+            .eq('user_id', userId)
+            .single();
+
+        if (propErr || !proposal) {
+            logger.error('[Membership] Proposal fetch failed for custom verify:', propErr || 'Proposal not found');
+            return res.status(404).json({ success: false, message: 'Proposal not found' });
+        }
+
+        // 3. Activate Custom Membership
+        try {
+            await adminClient.from('memberships').delete().eq('user_id', userId).eq('status', 'ACTIVE');
+        } catch (delErr) {
+            logger.warn('[Membership] Pre-active custom cleanup warning:', delErr.message);
+        }
+
+        const priceInPaise = Math.round(Number(proposal.custom_price) * 100);
+
+        const { error: insertErr } = await adminClient.from('memberships').insert([{
+            user_id: userId,
+            plan_id: null,
+            status: 'ACTIVE',
+            payment_id: razorpay_payment_id,
+            order_id: razorpay_order_id,
+            start_date: new Date().toISOString(),
+            end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            updated_at: new Date().toISOString(),
+            plan_snapshot: {
+                name: "Custom Proposal",
+                price: priceInPaise,
+                connects: proposal.custom_connects || 100,
+                service_fee: 5,
+                features: proposal.custom_features || ["Custom Proposal Access"]
+            }
+        }]);
+
+        if (insertErr) {
+            logger.error('[Membership] Custom Activation failed:', insertErr);
+            return res.status(500).json({ success: false, message: 'DB Custom Activation failed', error: insertErr });
+        }
+
+        // 4. Update Proposal status to RESOLVED
+        await adminClient
+            .from('membership_proposals')
+            .update({ 
+                status: 'RESOLVED', 
+                accepted_at: new Date().toISOString(),
+                updated_at: new Date().toISOString() 
+            })
+            .eq('id', proposal_id);
+
+        // 5. Credit Connects
+        try {
+            await connectsService.creditConnects(
+                userId, 
+                proposal.custom_connects || 100, 
+                'membership_payment', 
+                razorpay_order_id,
+                { source: 'custom_verify', plan: 'Custom Proposal' }
+            );
+        } catch (creditErr) {
+            logger.error('[Membership] Custom initial connects credit failed:', creditErr.message);
+        }
+
+        // 6. Sync Profile
+        try {
+            await adminClient.from('profiles').update({ 
+                membership_type: 'Custom Proposal',
+                is_pro: true,
+                updated_at: new Date().toISOString()
+            }).eq('user_id', userId);
+        } catch (profErr) {
+            logger.error('[Membership] Custom profile sync failed:', profErr.message);
+        }
+
+        // 7. Fetch updated membership and connects balance to return to client
+        let updatedMembership = null;
+        let updatedBalance = 0;
+        try {
+            const { data: mData } = await adminClient
+                .from('memberships')
+                .select('plan_id, status, end_date, plan_snapshot, plan:membership_plans(name)')
+                .eq('user_id', userId)
+                .eq('status', 'ACTIVE')
+                .maybeSingle();
+            updatedMembership = mData;
+
+            const { data: cData } = await adminClient
+                .from('user_connects')
+                .select('balance')
+                .eq('user_id', userId)
+                .maybeSingle();
+            updatedBalance = cData?.balance ?? 0;
+        } catch (fetchErr) {
+            logger.error('[Membership] Failed to fetch updated custom data for response:', fetchErr.message);
+        }
+
+        res.status(200).json({ 
+            success: true, 
+            message: 'Custom Proposal membership activated successfully!',
+            data: {
+                membership: updatedMembership,
+                balance: updatedBalance
+            }
+        });
+    } catch (error) {
+        logger.error('Verify Custom Payment Error:', error);
+        next(error);
+    }
+};
+

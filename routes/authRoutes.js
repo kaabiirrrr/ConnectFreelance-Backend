@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 const validate = require('../middleware/validate');
-const { registerSchema, loginSchema, resetPasswordSchema } = require('../schemas/userSchema');
+const { registerSchema, loginSchema, resetPasswordSchema, forgotPasswordSchema } = require('../schemas/userSchema');
 const { protect } = require('../middleware/authMiddleware');
 
 const { authLimiter } = require('../middleware/rateLimiter');
@@ -10,6 +10,8 @@ const { authLimiter } = require('../middleware/rateLimiter');
 router.post('/register', authLimiter, validate({ body: registerSchema }), authController.register);
 router.post('/login', authLimiter, validate({ body: loginSchema }), authController.login);
 router.post('/logout', authController.logout);
+router.post('/resend-verification', authLimiter, authController.resendVerification);
+router.post('/forgot-password', authLimiter, validate({ body: forgotPasswordSchema }), authController.forgotPassword);
 router.post('/reset-password', authLimiter, validate({ body: resetPasswordSchema }), authController.resetPassword);
 
 router.get('/google', authController.googleLogin);

@@ -3,7 +3,7 @@ const adminClient = require('../supabase/adminClient');
 const multer = require('multer');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
-const { sendVerificationLinkEmail } = require('../utils/emailService');
+const { sendVerificationLinkEmail, sendDeleteAccountOTPEmail } = require('../utils/emailService');
 const matchService = require('../services/matchService');
 const moderationService = require('../services/moderationService');
 const enforcementService = require('../services/enforcementService');
@@ -121,7 +121,7 @@ exports.getMe = async (req, res, next) => {
                 is_verified, profile_completed, profile_completion_percentage, 
                 connects_balance, has_availability_badge,
                 is_banned, is_restricted, warning_count,
-                dob, gender, phone, website, step_data
+                dob, gender, phone, website, step_data, online_for_messages
             `)
             .eq('user_id', userId)
             .single();
@@ -134,7 +134,7 @@ exports.getMe = async (req, res, next) => {
                     name, title, bio, avatar_url, role, skills, hourly_rate, 
                     location, country, city, experience, portfolio, rating, 
                     is_verified, profile_completed, profile_completion_percentage, 
-                    connects_balance, has_availability_badge
+                    connects_balance, has_availability_badge, online_for_messages
                 `)
                 .eq('user_id', userId)
                 .single();
@@ -188,7 +188,7 @@ exports.updateProfile = async (req, res, next) => {
             .from('profiles')
             .update(updates)
             .eq('user_id', userId)
-            .select('id:user_id, user_id, name, title, bio, avatar_url, skills, hourly_rate, location, country, city, experience, portfolio, rating, is_verified, profile_completed, dob, gender, phone, website, step_data')
+            .select('id:user_id, user_id, name, title, bio, avatar_url, skills, hourly_rate, location, country, city, experience, portfolio, rating, is_verified, profile_completed, dob, gender, phone, website, step_data, online_for_messages')
             .maybeSingle(); // Use maybeSingle to avoid PGRST116
 
         if (error) {
@@ -225,10 +225,11 @@ exports.getProfileStatus = async (req, res, next) => {
             .select(`
                 user_id, name, role, avatar_url, title, bio, 
                 profile_completion_percentage, profile_completed, 
-                step_data,
+                step_data, skills, category,
                 basic_info_completed, professional_info_completed, 
                 skills_completed, portfolio_completed, documents_completed,
-                dob, gender, phone, website, hourly_rate, experience, location
+                dob, gender, phone, website, hourly_rate, experience, location,
+                online_for_messages
             `)
             .eq('user_id', userId)
             .maybeSingle();
@@ -254,14 +255,38 @@ exports.getProfileStatus = async (req, res, next) => {
             });
         }
 
-        // Determine current_step from completion percentage
-        const pct = data.profile_completion_percentage || 0;
+        // Calculate percentage and current_step dynamically
         let current_step = 1;
-        if (pct >= 83) current_step = 6;
-        else if (pct >= 66) current_step = 5;
-        else if (pct >= 50) current_step = 4;
-        else if (pct >= 33) current_step = 3;
-        else if (pct >= 16) current_step = 2;
+        let pct = data.profile_completion_percentage || 0;
+
+        if (data.profile_completed || pct >= 100) {
+            pct = 100;
+            current_step = 6;
+        } else {
+            // Find first incomplete step
+            if (!data.basic_info_completed) current_step = 1;
+            else if (!data.skills_completed) current_step = 2;
+            else if (!data.portfolio_completed) current_step = 3;
+            else if (!data.documents_completed) current_step = 4;
+            else if (!data.professional_info_completed) current_step = 5;
+            else current_step = 6;
+
+            // Recalculate percentage based on true completed steps
+            let completedCount = 0;
+            if (data.basic_info_completed) completedCount++;
+            if (data.skills_completed) completedCount++;
+            if (data.portfolio_completed) completedCount++;
+            if (data.documents_completed) completedCount++;
+            if (data.professional_info_completed) completedCount++;
+
+            // Map completed steps to percentage values
+            if (completedCount === 5) pct = 100;
+            else if (completedCount === 4) pct = 83;
+            else if (completedCount === 3) pct = 66;
+            else if (completedCount === 2) pct = 50;
+            else if (completedCount === 1) pct = 33;
+            else pct = 16;
+        }
 
         res.status(200).json({
             success: true,
@@ -284,6 +309,15 @@ exports.getProfileStatus = async (req, res, next) => {
                 skills_completed: data.skills_completed || false,
                 portfolio_completed: data.portfolio_completed || false,
                 documents_completed: data.documents_completed || false,
+                // Skills — expose direct column so wizard can pre-populate
+                skills: (() => {
+                    const direct = Array.isArray(data.skills) ? data.skills : [];
+                    if (direct.length > 0) return direct;
+                    const sd = data.step_data || {};
+                    return Array.isArray(sd.skills) ? sd.skills : [];
+                })(),
+                category: data.category || (data.step_data || {}).category || null,
+                online_for_messages: data.online_for_messages !== false,
             }
         });
     } catch (error) {
@@ -311,28 +345,23 @@ exports.updateProfileStatus = async (req, res, next) => {
         let updates = {};
 
         // ── BULLET-PROOF NOT NULL SAFEGUARDS ──────────────────────────────────
-        // The `name` column is NOT NULL. We must ALWAYS provide it when creating
-        // a new row (INSERT). Use every possible fallback to guarantee a value.
-        const isNewProfile = !profile;
-        if (isNewProfile || !profile.name) {
-            const authMeta = req.user.user_metadata || {};
-            const rawName =
-                authMeta.full_name ||
-                authMeta.name ||
-                (req.user.email ? req.user.email.split('@')[0] : null) ||
-                'User';
-            // String() + trim() ensures we never send null/undefined to Postgres
-            updates.name = String(rawName).trim() || 'User';
-        }
+        // The `name` column is NOT NULL without default. Postgres upsert 
+        // requires the INSERT part to be completely valid even if it ends up updating.
+        // Therefore, we MUST always provide name, email, and role.
+        const authMeta = req.user.user_metadata || {};
+        const rawName =
+            profile?.name ||
+            authMeta.full_name ||
+            authMeta.name ||
+            (req.user.email ? req.user.email.split('@')[0] : null) ||
+            'User';
+        
+        updates.name = String(rawName).trim() || 'User';
+        updates.role = profile?.role || authMeta.role || 'FREELANCER';
+        updates.email = profile?.email || req.user.email || '';
 
+        const isNewProfile = !profile;
         if (isNewProfile) {
-            // Include all likely NOT NULL columns for a fresh INSERT
-            if (!updates.role) {
-                updates.role = req.user.user_metadata?.role || 'FREELANCER';
-            }
-            if (!updates.email) {
-                updates.email = req.user.email || '';
-            }
 
             // ── ENSURE PUBLIC.USERS RECORD EXISTS (Prevent FK constraint violation) ──
             await adminClient
@@ -378,6 +407,7 @@ exports.updateProfileStatus = async (req, res, next) => {
 
         // ── Step-specific field mapping ─────────────────────────────────────────
         if (step === 'basic_info') {
+            updates.basic_info_completed = true;
             // For basic_info, override with the form-submitted name (user typed it)
             updates.name = String(stepData.fullName || updates.name || 'User').trim() || 'User';
             updates.title = stepData.title;
@@ -403,10 +433,18 @@ exports.updateProfileStatus = async (req, res, next) => {
                 }
             };
         } else if (step === 'skills') {
+            // Build merged step_data first so both skills & category are persisted together
+            const mergedSkillsStepData = { ...existingStepData };
             if (stepData.skills) {
                 updates.skills = stepData.skills;
-                updates.step_data = { ...existingStepData, skills: stepData.skills };
+                mergedSkillsStepData.skills = stepData.skills;
             }
+            if (stepData.category) {
+                updates.category = stepData.category;
+                mergedSkillsStepData.category = stepData.category;
+            }
+            updates.step_data = mergedSkillsStepData;
+            updates.skills_completed = true;
         } else if (step === 'company_info') {
             if (stepData.companyName) updates.company_name = stepData.companyName;
             if (stepData.companySize) updates.company_size = parseInt(stepData.companySize);
@@ -422,6 +460,7 @@ exports.updateProfileStatus = async (req, res, next) => {
                 }
             };
         } else if (step === 'professional' || step === 'professional_info') {
+            updates.professional_info_completed = true;
             if (stepData.bio) updates.bio = stepData.bio;
             // Store years of experience only in step_data (experience column is reserved for work history array)
             if (stepData.rate) {
@@ -489,27 +528,41 @@ exports.updateProfileStatus = async (req, res, next) => {
             updates.documents_completed = true;
             if (stepData.documents) {
                 updates.step_data = { ...existingStepData, documents: stepData.documents };
+                // Also persist resume_url directly to the column for fast lookups
+                if (stepData.documents.resume) {
+                    updates.resume_url = stepData.documents.resume;
+                }
             }
         } else if (step === 'finish') {
             updates.profile_completed = true;
         }
 
-        const stepPercentages = {
-            'basic_info': 16,
-            'skills': 33,
-            'company_info': 33,
-            'portfolio': 50,
-            'personal_info': 50,
-            'documents': 66,
-            'contact_info': 66,
-            'professional_info': 83,
-            'location_info': 83,
-            'finish': 100
-        };
+        // Calculate dynamic completion percentage based on all completed step flags
+        let completedCount = 0;
+        const basic = updates.basic_info_completed !== undefined ? updates.basic_info_completed : profile?.basic_info_completed;
+        const skills = updates.skills_completed !== undefined ? updates.skills_completed : profile?.skills_completed;
+        const portfolio = updates.portfolio_completed !== undefined ? updates.portfolio_completed : profile?.portfolio_completed;
+        const docs = updates.documents_completed !== undefined ? updates.documents_completed : profile?.documents_completed;
+        const professional = updates.professional_info_completed !== undefined ? updates.professional_info_completed : profile?.professional_info_completed;
 
-        if (stepPercentages[step]) {
-            updates.profile_completion_percentage = stepPercentages[step];
+        if (basic) completedCount++;
+        if (skills) completedCount++;
+        if (portfolio) completedCount++;
+        if (docs) completedCount++;
+        if (professional) completedCount++;
+
+        let pct = 0;
+        if (updates.profile_completed || profile?.profile_completed) {
+            pct = 100;
+        } else {
+            if (completedCount === 5) pct = 100;
+            else if (completedCount === 4) pct = 83;
+            else if (completedCount === 3) pct = 66;
+            else if (completedCount === 2) pct = 50;
+            else if (completedCount === 1) pct = 33;
+            else pct = 16;
         }
+        updates.profile_completion_percentage = pct;
 
         // ── Helper: attempt upsert, retry without optional columns on schema error ──
         const attemptUpsert = async (payload) => {
@@ -526,7 +579,7 @@ exports.updateProfileStatus = async (req, res, next) => {
         // ── Retry without optional columns that may not exist in production ──
         const isSchemaError = error && (
             error.message?.includes('does not exist') ||
-            error.message?.includes('column') ||
+            (error.message?.includes('column') && !error.message?.includes('null value')) ||
             error.message?.includes('42703') ||
             error.code === '42703'
         );
@@ -726,7 +779,12 @@ exports.getAllFreelancers = async (req, res, next) => {
                 ...f,
                 id: f.user_id,
                 hourly_rate: resolvedRate || null,
-                skills: Array.isArray(f.skills) ? f.skills : [],
+                skills: (() => {
+                    const direct = Array.isArray(f.skills) ? f.skills : [];
+                    if (direct.length > 0) return direct;
+                    return Array.isArray(sd.skills) ? sd.skills : [];
+                })(),
+
                 experience_years,
                 work_hours,
                 step_data: undefined, // don't expose step_data to frontend
@@ -771,7 +829,7 @@ exports.getPublicProfile = async (req, res, next) => {
                 has_availability_badge, created_at,
                 is_banned, is_restricted, warning_count,
                 dob, gender, phone, website, step_data,
-                is_email_verified
+                is_email_verified, resume_url, category
             `)
             .eq('user_id', id)
             .maybeSingle();
@@ -787,7 +845,7 @@ exports.getPublicProfile = async (req, res, next) => {
                     profile_completed, profile_views, search_presence,
                     has_availability_badge, created_at,
                     dob, gender, phone, website, step_data,
-                    is_email_verified
+                    is_email_verified, resume_url, category
                 `)
                 .eq('user_id', id)
                 .maybeSingle();
@@ -873,12 +931,24 @@ exports.getPublicProfile = async (req, res, next) => {
 
                 return {
                     ...profile,
-                    skills: Array.isArray(profile.skills) ? profile.skills : [],
+                    // Resolve skills: direct column first, then step_data fallback
+                    skills: (() => {
+                        const directSkills = Array.isArray(profile.skills) ? profile.skills : [];
+                        if (directSkills.length > 0) return directSkills;
+                        const stepSkills = sd.skills;
+                        return Array.isArray(stepSkills) ? stepSkills : [];
+                    })(),
                     experience: workHistory,
                     experience_years,
                     work_hours,
                     hourly_rate: resolvedRate || 0,
                     reviews,
+                    // Expose resume URL: direct column first, then step_data fallback (needed by Resume tab)
+                    resume_url: profile.resume_url || sd.documents?.resume || null,
+                    // Expose portfolio array: direct portfolio first, then step_data fallback
+                    portfolio_files: Array.isArray(profile.portfolio) && profile.portfolio.length > 0 
+                        ? profile.portfolio 
+                        : (Array.isArray(sd.documents?.portfolio) ? sd.documents.portfolio : []),
                     // strip raw step_data from public response
                     step_data: undefined,
                 };
@@ -1296,6 +1366,94 @@ exports.uploadClientPhoto = async (req, res, next) => {
             success: true,
             data: { photo_url: photoUrl },
             message: 'Profile photo uploaded successfully'
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.sendDeleteAccountOTP = async (req, res, next) => {
+    try {
+        const userId = req.user.id;
+        const email = req.user.email;
+
+        // Generate a 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        const { data: profile } = await adminClient
+            .from('profiles')
+            .select('name')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        const { error } = await adminClient
+            .from('profiles')
+            .update({ email_otp: otp, otp_expires_at: expiresAt })
+            .eq('user_id', userId);
+
+        if (error) throw error;
+
+        await sendDeleteAccountOTPEmail(email, otp, profile?.name || '');
+
+        res.status(200).json({
+            success: true,
+            message: 'Verification OTP sent to your email'
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.deleteAccount = async (req, res, next) => {
+    try {
+        const userId = req.user.id;
+        const { otp, confirmPhrase, reason } = req.body;
+
+        if (!otp || !confirmPhrase) {
+            return res.status(400).json({
+                success: false,
+                message: 'Verification code and confirmation phrase are required'
+            });
+        }
+
+        // 1. Fetch profile to verify OTP and confirmPhrase
+        const { data: profile, error: fetchError } = await adminClient
+            .from('profiles')
+            .select('email, name, email_otp, otp_expires_at')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        if (fetchError || !profile) {
+            return res.status(404).json({ success: false, message: 'Profile not found' });
+        }
+
+        // 2. Validate OTP
+        if (!profile.email_otp || String(profile.email_otp).trim() !== String(otp).trim()) {
+            return res.status(400).json({ success: false, message: 'Invalid verification code' });
+        }
+
+        if (new Date(profile.otp_expires_at) < new Date()) {
+            return res.status(400).json({ success: false, message: 'Verification code has expired' });
+        }
+
+        // 3. Validate confirmation phrase
+        const expectedPhrase = `delete-account/${profile.email}`;
+        if (confirmPhrase.trim() !== expectedPhrase) {
+            return res.status(400).json({
+                success: false,
+                message: `Confirmation phrase mismatch. Please enter "${expectedPhrase}" exactly.`
+            });
+        }
+
+        // 4. Delete user (Cascade will handle public.users, profiles, etc.)
+        const { error: deleteError } = await adminClient.auth.admin.deleteUser(userId);
+
+        if (deleteError) throw deleteError;
+
+        res.status(200).json({
+            success: true,
+            message: 'Your account has been deleted successfully'
         });
     } catch (error) {
         next(error);

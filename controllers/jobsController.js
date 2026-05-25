@@ -228,7 +228,7 @@ exports.getAllJobs = async (req, res, next) => {
         if (clientIds.length > 0) {
             const { data: profiles } = await adminClient
                 .from('profiles')
-                .select('user_id, name, company_name, avatar_url, country, location')
+                .select('user_id, name, company_name, avatar_url, country, location, rating, reviews_count')
                 .in('user_id', clientIds);
 
 
@@ -300,7 +300,7 @@ exports.getJobById = async (req, res, next) => {
                 id, title, description, category, skills, budget_type, 
                 budget_amount, experience_level, duration, status, job_mode,
                 created_at, client_id, attachments, bid_deadline, is_bidding_open,
-                client:profiles(name, company_name, avatar_url, country, location), 
+                client:profiles(name, company_name, avatar_url, country, location, rating, reviews_count), 
                 proposals(id, freelancer_id, proposed_rate, status, role_id),
                 roles:job_roles(*)
             `)
@@ -540,7 +540,8 @@ exports.findWork = async (req, res, next) => {
             const { data, error, count } = await adminClient.from('jobs').select(`
                 id, title, description, category, skills, budget_type, 
                 budget_amount, experience_level, duration, status, 
-                created_at, client_id, proposal_count
+                created_at, client_id, proposal_count,
+                client:profiles(user_id, name, company_name, avatar_url, country, location, rating, reviews_count)
             `, { count: 'exact' })
             .in('id', savedIds)
             .eq('is_bidding_open', true)
@@ -586,7 +587,7 @@ exports.findWork = async (req, res, next) => {
         const clientIds = [...new Set((jobs || []).map(j => j.client_id).filter(Boolean))];
         let profileMap = {};
         if (clientIds.length) {
-            const { data: profiles } = await adminClient.from('profiles').select('user_id, name, avatar_url, company_name, country, location').in('user_id', clientIds);
+            const { data: profiles } = await adminClient.from('profiles').select('user_id, name, avatar_url, company_name, country, location, rating, reviews_count').in('user_id', clientIds);
             profileMap = Object.fromEntries((profiles || []).map(p => [p.user_id, p]));
 
         }
@@ -645,7 +646,7 @@ exports.searchJobs = async (req, res, next) => {
         const clientIds = [...new Set((data || []).map(j => j.client_id).filter(Boolean))];
         let profileMap = {};
         if (clientIds.length) {
-            const { data: profiles } = await adminClient.from('profiles').select('user_id, name, avatar_url, company_name, country, location').in('user_id', clientIds);
+            const { data: profiles } = await adminClient.from('profiles').select('user_id, name, avatar_url, company_name, country, location, rating, reviews_count').in('user_id', clientIds);
             profileMap = Object.fromEntries((profiles || []).map(p => [p.user_id, p]));
         }
 
