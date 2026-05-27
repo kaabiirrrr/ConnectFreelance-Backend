@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS public.user_presence (
 
 -- 2. Create Admin Presence Table (Tracks custom moderator/admin modules)
 CREATE TABLE IF NOT EXISTS public.admin_presence (
-    admin_id uuid PRIMARY KEY,
+    admin_id uuid PRIMARY KEY REFERENCES public.admins(id) ON DELETE CASCADE,
     status text NOT NULL DEFAULT 'offline', -- 'online', 'reviewing', 'moderating', 'finance', 'idle', 'inactive'
     last_active timestamptz DEFAULT now(),
     current_module text, -- 'KYC', 'Disputes', 'Treasury', 'FAQ', 'Command Center'

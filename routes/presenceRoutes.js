@@ -29,7 +29,13 @@ router.get('/admin/sessions', protectAdmin, async (req, res) => {
             .select('*')
             .order('created_at', { ascending: false });
 
-        if (error) throw error;
+        if (error) {
+            if (error.code === '42P01' || error.message?.includes('does not exist')) {
+                logger.warn('[Presence] active_sessions table not found. Run the presence migration.');
+                return res.json({ success: true, data: [] });
+            }
+            throw error;
+        }
 
         // Enrich with online status from in-memory socket map
         const enriched = sessions.map(s => ({
@@ -53,7 +59,13 @@ router.get('/admin/user-presence', protectAdmin, async (req, res) => {
             .order('last_seen', { ascending: false })
             .limit(200);
 
-        if (error) throw error;
+        if (error) {
+            if (error.code === '42P01' || error.message?.includes('does not exist')) {
+                logger.warn('[Presence] user_presence table not found. Run the presence migration.');
+                return res.json({ success: true, data: [] });
+            }
+            throw error;
+        }
 
         // Merge with in-memory socket data for real-time accuracy
         const enriched = data.map(p => ({
@@ -71,15 +83,36 @@ router.get('/admin/user-presence', protectAdmin, async (req, res) => {
 // GET /api/presence/admin/admin-presence — get all admin presence records (admin-auth)
 router.get('/admin/admin-presence', protectAdmin, async (req, res) => {
     try {
-        const { data, error } = await adminClient
+        // Fetch presence records first (no FK join — admin_presence has no FK to admins)
+        const { data: presenceData, error: presenceError } = await adminClient
             .from('admin_presence')
-            .select('*, admins(id, email, name, role, photo_url)')
+            .select('*')
             .order('last_active', { ascending: false });
 
-        if (error) throw error;
+        if (presenceError) {
+            if (presenceError.code === '42P01' || presenceError.message?.includes('does not exist')) {
+                logger.warn('[Presence] admin_presence table not found. Run the presence migration.');
+                return res.json({ success: true, data: [] });
+            }
+            throw presenceError;
+        }
 
-        const enriched = data.map(p => ({
+        // Fetch admin details separately and merge
+        const adminIds = [...new Set((presenceData || []).map(p => p.admin_id).filter(Boolean))];
+        let adminsMap = {};
+
+        if (adminIds.length > 0) {
+            const { data: adminsData } = await adminClient
+                .from('admins')
+                .select('id, email, name, role, photo_url')
+                .in('id', adminIds);
+
+            (adminsData || []).forEach(a => { adminsMap[a.id] = a; });
+        }
+
+        const enriched = (presenceData || []).map(p => ({
             ...p,
+            admins: adminsMap[p.admin_id] || null,
             is_socket_connected: isUserOnline(p.admin_id)
         }));
 
