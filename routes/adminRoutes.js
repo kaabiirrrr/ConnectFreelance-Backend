@@ -69,9 +69,21 @@ router.get('/logs/summary', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMI
 router.get('/analytics/overview', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminAnalyticsController.getDashboardOverview);
 router.get('/analytics/activity', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminAnalyticsController.getPlatformActivity);
 router.get('/analytics/stats', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminAnalyticsController.getAdminActivityStats);
+// New analytics endpoints
+router.get('/analytics/error-heatmap', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminAnalyticsController.getErrorHeatmap);
+router.get('/analytics/recent-errors', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminAnalyticsController.getRecentErrors);
+router.get('/analytics/sessions', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminAnalyticsController.getUserSessions);
+router.get('/analytics/user-journey/:userId', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminAnalyticsController.getUserJourney);
+router.get('/analytics/stale-users', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminAnalyticsController.getStaleUsers);
+router.get('/analytics/dropoffs', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminAnalyticsController.getDropoffPoints);
+router.get('/analytics/user-inspector', protectAdmin, authorizeAdmin(...ADMIN_ROLES_LIST), adminAnalyticsController.getUserInspector);
 
 // Announcements analytics (called by OffersPage as /api/admin/announcements/analytics)
 router.get('/announcements/analytics', protectAdmin, announcementsController.getAnalytics);
+router.get('/announcements', protectAdmin, announcementsController.getAllAnnouncements);
+router.post('/announcements/create', protectAdmin, announcementsController.createAnnouncement);
+router.patch('/announcements/:id', protectAdmin, announcementsController.updateAnnouncement);
+router.delete('/announcements/:id', protectAdmin, announcementsController.deleteAnnouncement);
 
 // ==========================================
 // User Management & Verification
@@ -79,6 +91,7 @@ router.get('/announcements/analytics', protectAdmin, announcementsController.get
 router.get('/users', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminUserController.getAllUsers);
 router.put('/users/:id/toggle-status', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminUserController.toggleUserStatus);
 router.post('/users/:id/reset-password', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminUserController.resetUserPassword);
+router.post('/users/:id/send-profile-reminder', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMIN, ADMIN_ROLES.SUPER_ADMIN), adminUserController.sendProfileReminder);
 router.post('/users', protectAdmin, authorizeAdmin(ADMIN_ROLES.SUPER_ADMIN), adminUserController.createUser);
 router.delete('/users/:id', protectAdmin, authorizeAdmin(ADMIN_ROLES.SUPER_ADMIN), adminUserController.deleteUser);
 
@@ -109,7 +122,9 @@ router.put('/settings/commission', protectAdmin, authorizeAdmin(ADMIN_ROLES.ADMI
 // ==========================================
 // Skills & Announcements
 // ==========================================
+router.get('/skills', protectAdmin, adminGeneralController.getSkills);
 router.post('/skills', protectAdmin, adminGeneralController.addSkill);
+router.put('/skills/:id', protectAdmin, adminGeneralController.updateSkill);
 router.delete('/skills/:id', protectAdmin, adminGeneralController.deleteSkill);
 router.post('/announcements', protectAdmin, adminGeneralController.createAnnouncement);
 router.get('/announcements', protectAdmin, adminGeneralController.getAnnouncements);

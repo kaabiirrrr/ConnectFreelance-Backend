@@ -19,7 +19,23 @@ exports.getSalesProposals = async (req, res, next) => {
         const { data, error } = await query;
         if (error) throw error;
 
-        res.status(200).json({ success: true, data });
+        // Enrich with profile data (same pattern as UsersTable)
+        const userIds = [...new Set((data || []).map(p => p.user_id).filter(Boolean))];
+        let profileMap = {};
+        if (userIds.length > 0) {
+            const { data: profiles } = await supabase
+                .from('profiles')
+                .select('user_id, name, avatar_url')
+                .in('user_id', userIds);
+            (profiles || []).forEach(p => { profileMap[p.user_id] = p; });
+        }
+
+        const enriched = (data || []).map(p => ({
+            ...p,
+            profile: profileMap[p.user_id] || null
+        }));
+
+        res.status(200).json({ success: true, data: enriched });
     } catch (error) {
         logger.error('[AdminSalesProposal] Error in getSalesProposals', error);
         next(error);

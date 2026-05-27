@@ -162,6 +162,9 @@ app.use('/api/webhooks/razorpay', express.raw({ type: 'application/json' }));
 
 app.use(express.json());
 
+// Error tracking middleware — logs 4xx/5xx per user/feature
+app.use(require('./middleware/errorTracker'));
+
 // ======================
 // ROUTE REGISTRATION (Deferred/Parallelized)
 // ======================

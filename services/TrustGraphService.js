@@ -234,7 +234,11 @@ class TrustGraphService {
                 .from('fraud_links')
                 .select('*');
 
-            if (error) throw error;
+            // Gracefully handle missing table or empty data
+            if (error) {
+                logger.warn('[TrustGraphService] fraud_links table may not exist yet:', error.message);
+                return [];
+            }
             if (!allLinks || allLinks.length === 0) return [];
 
             // 2. Build adjacency list

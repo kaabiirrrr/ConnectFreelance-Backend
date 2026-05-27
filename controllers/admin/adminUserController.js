@@ -4,7 +4,7 @@ const logger = require('../../utils/logger');
 
 exports.getAllUsers = async (req, res, next) => {
     try {
-        const { role, limit = 50, offset = 0, search = '' } = req.query;
+        const { role, limit = 50, offset = 0, search = '', completion = '', strikes = '' } = req.query;
 
         // 1. Fetch users from public profiles table
         let query = supabase
@@ -19,9 +19,27 @@ exports.getAllUsers = async (req, res, next) => {
             query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%`);
         }
 
+        // Profile completion filter (server-side)
+        if (completion === 'complete') {
+            query = query.eq('profile_completion_percentage', 100);
+        } else if (completion === 'inprogress') {
+            query = query.gt('profile_completion_percentage', 0).lt('profile_completion_percentage', 100);
+        } else if (completion === 'notstarted') {
+            query = query.eq('profile_completion_percentage', 0);
+        }
+
+        // Strikes filter (server-side)
+        if (strikes === 'hasstrikes') {
+            query = query.gte('warning_count', 1);
+        } else if (strikes === 'highrisk') {
+            query = query.gte('warning_count', 3);
+        } else if (strikes === 'nostrikes') {
+            query = query.or('warning_count.is.null,warning_count.eq.0');
+        }
+
         const { data: dbUsers, count, error: dbError } = await query
             .order('created_at', { ascending: false })
-            .range(offset, parseInt(offset) + parseInt(limit) - 1);
+            .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
 
         if (dbError) throw dbError;
 
@@ -69,7 +87,12 @@ exports.getAllUsers = async (req, res, next) => {
             return {
                 ...user,
                 id: user.user_id || user.id,
-                profile: enrichedProfile,
+                profile: {
+                    ...enrichedProfile,
+                    is_verified: enrichedProfile.is_verified || false,
+                    is_email_verified: enrichedProfile.is_email_verified || enrichedProfile.email_verified || false,
+                    email_verified: enrichedProfile.email_verified || enrichedProfile.is_email_verified || false,
+                },
                 profile_completion_percentage: profileCompletionPercentage,
                 last_login: authUser?.last_sign_in_at || null,
                 is_banned: !!authUser?.banned_until && new Date(authUser.banned_until) > new Date(),
@@ -267,6 +290,46 @@ exports.createUser = async (req, res, next) => {
             data: authUser.user
         });
     } catch (error) {
+        next(error);
+    }
+};
+
+// ─── Send Profile Completion Reminder Email ───────────────────────────────────
+// POST /api/admin/users/:id/send-profile-reminder
+exports.sendProfileReminder = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { sendProfileCompleteReminderEmail } = require('../../utils/emailService');
+
+        // Get user profile
+        const { data: profile, error } = await supabase
+            .from('profiles')
+            .select('name, email, role, profile_completion_percentage')
+            .eq('user_id', id)
+            .maybeSingle();
+
+        if (error || !profile) {
+            return res.status(404).json({ success: false, message: 'User profile not found' });
+        }
+
+        // Get email from auth if not in profile
+        let email = profile.email;
+        if (!email) {
+            const { data: authUser } = await supabase.auth.admin.getUserById(id);
+            email = authUser?.user?.email;
+        }
+
+        if (!email) {
+            return res.status(400).json({ success: false, message: 'No email address found for this user' });
+        }
+
+        await sendProfileCompleteReminderEmail(email, profile.name || 'User', profile.role || 'FREELANCER');
+
+        await logAction(req.user.id, 'PROFILE_REMINDER_SENT', id, `Sent profile completion reminder to ${email}`);
+
+        res.status(200).json({ success: true, message: `Profile reminder sent to ${email}` });
+    } catch (error) {
+        logger.error('[AdminUser] sendProfileReminder error', error);
         next(error);
     }
 };

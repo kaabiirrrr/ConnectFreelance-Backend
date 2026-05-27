@@ -212,86 +212,36 @@ exports.getDashboardOverview = async (req, res, next) => {
             console.error("Error in aggregation", err);
         }
 
-        // ── Top freelancers by contracts ──────────────────────────────────────
+        // Top freelancers by contracts
         const { data: topFreelancersRaw } = await supabase
             .from('contracts')
-            .select('freelancer_id')
-            .in('status', ['COMPLETED', 'ACTIVE'])
+            .select('freelancer_id, profiles!contracts_freelancer_id_fkey(name, avatar_url)')
+            .eq('status', 'COMPLETED')
             .limit(500);
 
-        const freelancerCountMap = {};
-        (topFreelancersRaw || []).forEach(c => {
-            if (!c.freelancer_id) return;
-            freelancerCountMap[c.freelancer_id] = (freelancerCountMap[c.freelancer_id] || 0) + 1;
+        const freelancerMap = {};
+        topFreelancersRaw?.forEach(c => {
+            const id = c.freelancer_id;
+            if (!id) return;
+            if (!freelancerMap[id]) freelancerMap[id] = { id, name: c.profiles?.name || 'Unknown', avatar: c.profiles?.avatar_url, count: 0 };
+            freelancerMap[id].count++;
         });
+        const topFreelancers = Object.values(freelancerMap).sort((a, b) => b.count - a.count).slice(0, 5);
 
-        const topFreelancerIds = Object.entries(freelancerCountMap)
-            .sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id]) => id);
-
-        let topFreelancers = [];
-        if (topFreelancerIds.length > 0) {
-            const { data: flProfiles } = await supabase
-                .from('profiles')
-                .select('user_id, name, email, avatar_url')
-                .in('user_id', topFreelancerIds);
-
-            const { data: flAuthList } = await supabase.auth.admin.listUsers({ perPage: 1000 });
-            const flAuthMap = {};
-            (flAuthList?.users || []).forEach(u => { flAuthMap[u.id] = u; });
-
-            const flProfileMap = {};
-            (flProfiles || []).forEach(p => { flProfileMap[p.user_id] = p; });
-
-            topFreelancers = topFreelancerIds.map(id => {
-                const p = flProfileMap[id];
-                const a = flAuthMap[id];
-                const name = (p?.name && p.name.trim()) ? p.name
-                    : (a?.user_metadata?.full_name || a?.user_metadata?.name || a?.email?.split('@')[0] || 'Unknown');
-                const email = p?.email || a?.email || null;
-                const avatar = p?.avatar_url || a?.user_metadata?.avatar_url || null;
-                return { id, name, email, avatar, count: freelancerCountMap[id] || 0 };
-            });
-        }
-
-        // ── Top clients by jobs posted ────────────────────────────────────────
+        // Top clients by jobs posted
         const { data: topClientsRaw } = await supabase
             .from('jobs')
-            .select('client_id')
+            .select('client_id, profiles!jobs_client_id_fkey(name, avatar_url)')
             .limit(500);
 
-        const clientCountMap = {};
-        (topClientsRaw || []).forEach(j => {
-            if (!j.client_id) return;
-            clientCountMap[j.client_id] = (clientCountMap[j.client_id] || 0) + 1;
+        const clientMap = {};
+        topClientsRaw?.forEach(j => {
+            const id = j.client_id;
+            if (!id) return;
+            if (!clientMap[id]) clientMap[id] = { id, name: j.profiles?.name || 'Unknown', avatar: j.profiles?.avatar_url, count: 0 };
+            clientMap[id].count++;
         });
-
-        const topClientIds = Object.entries(clientCountMap)
-            .sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id]) => id);
-
-        let topClients = [];
-        if (topClientIds.length > 0) {
-            const { data: clProfiles } = await supabase
-                .from('profiles')
-                .select('user_id, name, email, avatar_url')
-                .in('user_id', topClientIds);
-
-            const { data: clAuthList } = await supabase.auth.admin.listUsers({ perPage: 1000 });
-            const clAuthMap = {};
-            (clAuthList?.users || []).forEach(u => { clAuthMap[u.id] = u; });
-
-            const clProfileMap = {};
-            (clProfiles || []).forEach(p => { clProfileMap[p.user_id] = p; });
-
-            topClients = topClientIds.map(id => {
-                const p = clProfileMap[id];
-                const a = clAuthMap[id];
-                const name = (p?.name && p.name.trim()) ? p.name
-                    : (a?.user_metadata?.full_name || a?.user_metadata?.name || a?.email?.split('@')[0] || 'Unknown');
-                const email = p?.email || a?.email || null;
-                const avatar = p?.avatar_url || a?.user_metadata?.avatar_url || null;
-                return { id, name, email, avatar, count: clientCountMap[id] || 0 };
-            });
-        }
+        const topClients = Object.values(clientMap).sort((a, b) => b.count - a.count).slice(0, 5);
 
         // User acquisition funnel
         const { count: profilesCompleted } = await supabase
@@ -794,7 +744,6 @@ exports.getDropoffPoints = async (req, res, next) => {
     }
 };
 
-
 // ─── Per-User Activity Inspector ──────────────────────────────────────────────
 // GET /api/admin/analytics/user-inspector?search=email_or_name
 exports.getUserInspector = async (req, res, next) => {
@@ -803,115 +752,93 @@ exports.getUserInspector = async (req, res, next) => {
         if (!search || !search.trim()) return res.status(200).json({ success: true, data: null });
 
         const term = search.trim();
-        logger.info('[UserInspector] Searching for: ' + term);
+        logger.info(`[UserInspector] Searching for: "${term}"`);
 
-        const PROFILE_COLS = 'user_id, name, email, avatar_url, photo_url, role, title, bio, created_at, updated_at, is_banned, is_restricted, warning_count, trust_score, is_verified, is_featured, verification_status, profile_completion_percentage';
-
+        // 1. Try to find user — run name and email searches separately to avoid
+        //    PostgREST .or() parsing issues with special chars like @ and .
         let profile = null;
 
-        // Step 1: search profiles by email
+        // Search by email first (exact match preferred)
         const { data: byEmail } = await supabase
             .from('profiles')
-            .select(PROFILE_COLS)
-            .ilike('email', '%' + term + '%')
+            .select('user_id, name, email, avatar_url, role, created_at, updated_at, is_banned, is_restricted, warning_count, trust_score, title')
+            .ilike('email', `%${term}%`)
             .limit(1);
 
         if (byEmail && byEmail.length > 0) {
             profile = byEmail[0];
-            logger.info('[UserInspector] Found by profiles.email: ' + profile.user_id);
+            logger.info(`[UserInspector] Found by email: ${profile.user_id}`);
         }
 
-        // Step 2: search profiles by name
+        // If not found by email, search by name
         if (!profile) {
             const { data: byName } = await supabase
                 .from('profiles')
-                .select(PROFILE_COLS)
-                .ilike('name', '%' + term + '%')
+                .select('user_id, name, email, avatar_url, role, created_at, updated_at, is_banned, is_restricted, warning_count, trust_score, title')
+                .ilike('name', `%${term}%`)
                 .limit(1);
 
             if (byName && byName.length > 0) {
                 profile = byName[0];
-                logger.info('[UserInspector] Found by profiles.name: ' + profile.user_id);
+                logger.info(`[UserInspector] Found by name: ${profile.user_id}`);
             }
         }
 
-        // Step 3: fall back to auth.users
+        // If still not found, try auth.users (email may not be synced to profiles)
         if (!profile) {
+            // Try exact email lookup via auth admin API
             let authUser = null;
-
             try {
-                const { data: authData, error: authErr } = await supabase.auth.admin.getUserByEmail(term);
-                if (!authErr && authData && authData.user) {
-                    authUser = authData.user;
-                    logger.info('[UserInspector] Found in auth by getUserByEmail: ' + authUser.id);
-                }
-            } catch (_) {}
-
-            if (!authUser) {
+                const { data: authData } = await supabase.auth.admin.getUserByEmail(term);
+                if (authData?.user) authUser = authData.user;
+            } catch (_) {
+                // getUserByEmail may not exist on older SDK versions — fall back to listUsers
                 try {
-                    const { data: authList } = await supabase.auth.admin.listUsers({ perPage: 1000 });
-                    const users = (authList && authList.users) ? authList.users : [];
-                    const lterm = term.toLowerCase();
-                    authUser = users.find(u => {
-                        const em = u.email && u.email.toLowerCase().includes(lterm);
-                        const nm = u.user_metadata && (
-                            (u.user_metadata.name && u.user_metadata.name.toLowerCase().includes(lterm)) ||
-                            (u.user_metadata.full_name && u.user_metadata.full_name.toLowerCase().includes(lterm))
-                        );
-                        return em || nm;
-                    }) || null;
-                    if (authUser) logger.info('[UserInspector] Found in auth by listUsers: ' + authUser.id);
-                } catch (__) {}
+                    const { data: authUsers } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+                    authUser = (authUsers?.users || []).find(u =>
+                        u.email?.toLowerCase().includes(term.toLowerCase())
+                    ) || null;
+                } catch (__) { /* skip */ }
             }
 
             if (authUser) {
-                const { data: realProfile } = await supabase
+                // Try to get their profile by user_id
+                const { data: profileById } = await supabase
                     .from('profiles')
-                    .select(PROFILE_COLS)
+                    .select('user_id, name, email, avatar_url, role, created_at, updated_at, is_banned, is_restricted, warning_count, trust_score, title')
                     .eq('user_id', authUser.id)
                     .maybeSingle();
 
-                if (realProfile) {
-                    profile = Object.assign({}, realProfile, {
-                        email: realProfile.email || authUser.email
-                    });
-                    logger.info('[UserInspector] Loaded real profile via auth fallback: ' + profile.user_id);
+                if (profileById) {
+                    profile = { ...profileById, email: profileById.email || authUser.email };
                 } else {
-                    const m = authUser.user_metadata || {};
+                    // User exists in auth but has no profile yet
                     profile = {
                         user_id: authUser.id,
-                        name: m.full_name || m.name || (authUser.email ? authUser.email.split('@')[0] : 'Unknown'),
+                        name: authUser.user_metadata?.name || authUser.email?.split('@')[0] || 'Unknown',
                         email: authUser.email,
-                        avatar_url: m.avatar_url || null,
-                        photo_url: null,
-                        role: 'NO PROFILE',
-                        title: null, bio: null,
+                        avatar_url: null,
+                        role: 'UNKNOWN',
                         created_at: authUser.created_at,
                         updated_at: authUser.updated_at,
-                        is_banned: false, is_restricted: false,
-                        warning_count: 0, trust_score: null,
-                        is_verified: false, is_featured: false,
-                        verification_status: null, profile_completion_percentage: 0
+                        is_banned: false,
+                        is_restricted: false,
+                        warning_count: 0,
+                        trust_score: null,
+                        title: null
                     };
                 }
             }
         }
 
         if (!profile) {
-            logger.warn('[UserInspector] No user found for: ' + term);
+            logger.warn(`[UserInspector] No user found for search: "${term}"`);
             return res.status(200).json({ success: true, data: null });
         }
 
         const userId = profile.user_id;
 
-        // Step 4: get real last_sign_in from auth
-        let lastSignIn = null;
-        try {
-            const { data: authById } = await supabase.auth.admin.getUserById(userId);
-            if (authById && authById.user) lastSignIn = authById.user.last_sign_in_at || null;
-        } catch (_) {}
-
-        // Step 5: fetch activity, errors, contracts in parallel
+        // 2. Fetch journey, errors, contracts in parallel
         const [journeyResult, errorsResult, contractsResult] = await Promise.allSettled([
             supabase.from('user_activity_logs')
                 .select('page_path, feature_name, action_type, created_at')
@@ -924,14 +851,14 @@ exports.getUserInspector = async (req, res, next) => {
                 .order('created_at', { ascending: false })
                 .limit(20),
             supabase.from('contracts')
-                .select('id, status, created_at, agreed_rate')
-                .or('freelancer_id.eq.' + userId + ',client_id.eq.' + userId)
+                .select('id, status, created_at')
+                .or(`freelancer_id.eq.${userId},client_id.eq.${userId}`)
                 .order('created_at', { ascending: false })
                 .limit(10)
         ]);
 
-        // Step 6: compute risk score
-        const errorCount = (errorsResult.value && errorsResult.value.data) ? errorsResult.value.data.length : 0;
+        // 3. Compute risk score
+        const errorCount = errorsResult.value?.data?.length || 0;
         const warningCount = profile.warning_count || 0;
         const riskScore = Math.min(100, Math.round(
             (profile.is_banned ? 80 : 0) +
@@ -940,16 +867,14 @@ exports.getUserInspector = async (req, res, next) => {
             (errorCount * 2)
         ));
 
-        const avatar = profile.photo_url || profile.avatar_url || null;
-
         res.status(200).json({
             success: true,
             data: {
-                profile: Object.assign({}, profile, { avatar: avatar, last_sign_in: lastSignIn }),
-                journey: (journeyResult.value && journeyResult.value.data) ? journeyResult.value.data : [],
-                errors: (errorsResult.value && errorsResult.value.data) ? errorsResult.value.data : [],
-                contracts: (contractsResult.value && contractsResult.value.data) ? contractsResult.value.data : [],
-                riskScore: riskScore
+                profile,
+                journey: journeyResult.value?.data || [],
+                errors: errorsResult.value?.data || [],
+                contracts: contractsResult.value?.data || [],
+                riskScore
             }
         });
     } catch (err) {

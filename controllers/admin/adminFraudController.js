@@ -10,16 +10,18 @@ const logger = require('../../utils/logger');
 exports.getClusters = async (req, res, next) => {
     try {
         const clusters = await TrustGraphService.discoverClusters();
-        
+
+        if (!clusters || clusters.length === 0) {
+            return res.status(200).json({ success: true, data: [] });
+        }
+
         // Enrich clusters with user profiles
         const enrichedClusters = await Promise.all(clusters.map(async (cluster) => {
-            const { data: profiles, error } = await adminClient
+            const { data: profiles } = await adminClient
                 .from('profiles')
-                .select('user_id, name, email, avatar_url, trust_score, fraud_flag')
+                .select('user_id, name, email, avatar_url, trust_score, fraud_flag, role, is_banned, created_at, country, title, total_earnings, total_spent')
                 .in('user_id', cluster.userIds);
-            
-            if (error) throw error;
-            
+
             return {
                 ...cluster,
                 users: profiles || []

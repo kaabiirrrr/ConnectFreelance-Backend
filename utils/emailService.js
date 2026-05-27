@@ -288,3 +288,41 @@ exports.sendContractUpdateEmail = async (toEmail, contractTitle, updateType, det
         logger.error(`[Email] Contract update send failed to ${toEmail}:`, err?.response?.data || err.message);
     }
 };
+
+// ─── PROFILE COMPLETION REMINDER EMAIL ───────────────────────────────────────
+
+exports.sendProfileCompleteReminderEmail = async (toEmail, name = 'User', role = 'FREELANCER') => {
+    const frontendUrl = process.env.FRONTEND_URL || 'https://connectfreelance.in';
+    const isClient = role === 'CLIENT';
+    const dashboardUrl = isClient
+        ? `${frontendUrl}/client/dashboard`
+        : `${frontendUrl}/freelancer/dashboard`;
+    const profileUrl = isClient
+        ? `${frontendUrl}/client/settings`
+        : `${frontendUrl}/freelancer/profile`;
+
+    try {
+        await sendEmail({
+            to: toEmail,
+            subject: 'Complete your Connect Freelance profile',
+            html: buildStandardEmail(`
+                <p class="text-main" style="font-size:16px;line-height:1.5;margin:0 0 24px;color:#111827;">Hi ${name},</p>
+                <p class="text-main" style="font-size:16px;line-height:1.6;margin:0 0 16px;color:#111827;">
+                    Your Connect Freelance profile is incomplete. A complete profile helps you ${isClient ? 'attract top freelancers and post jobs faster' : 'get discovered by clients and win more projects'}.
+                </p>
+                <p class="text-main" style="font-size:15px;line-height:1.6;margin:0 0 32px;color:#374151;">
+                    It only takes a few minutes — add your ${isClient ? 'company details, location, and a profile photo' : 'skills, hourly rate, bio, and portfolio'} to stand out on the platform.
+                </p>
+                <div style="text-align:center;margin:32px 0;">
+                    <a href="${profileUrl}" style="display:inline-block;background-color:#0ea5e9;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:4px;font-weight:600;font-size:15px;">Complete My Profile</a>
+                </div>
+                <p class="text-muted" style="font-size:13px;line-height:1.6;margin:0 0 32px;color:#9ca3af;text-align:center;">
+                    Or <a href="${dashboardUrl}" style="color:#0ea5e9;text-decoration:none;">go to your dashboard</a> to get started.
+                </p>
+            `),
+        });
+    } catch (err) {
+        logger.error(`[Email] Profile reminder send failed to ${toEmail}:`, err?.response?.data || err.message);
+        throw err;
+    }
+};

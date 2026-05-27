@@ -22,10 +22,20 @@ exports.getVerificationList = async (req, res, next) => {
 
         // 1. Get all users of this role from profiles
         // role column may store 'CLIENT'/'FREELANCER' or 'client'/'freelancer'
-        const { data: profiles, error: profileError } = await adminClient
+        let profiles, profileError;
+        // Try with last_verification_reminder_at first; fall back if column doesn't exist yet
+        ({ data: profiles, error: profileError } = await adminClient
             .from('profiles')
-            .select('user_id, name, email, avatar_url, role, created_at')
-            .or(`role.eq.${role},role.eq.${role.toLowerCase()}`);
+            .select('user_id, name, email, avatar_url, role, created_at, last_verification_reminder_at')
+            .or(`role.eq.${role},role.eq.${role.toLowerCase()}`));
+
+        if (profileError) {
+            // Column may not exist yet — retry without it
+            ({ data: profiles, error: profileError } = await adminClient
+                .from('profiles')
+                .select('user_id, name, email, avatar_url, role, created_at')
+                .or(`role.eq.${role},role.eq.${role.toLowerCase()}`));
+        }
 
         if (profileError) throw profileError;
 
@@ -126,7 +136,7 @@ exports.getVerificationList = async (req, res, next) => {
                 pan_number: ver?.pan_number || null,
                 driving_license_number: ver?.driving_license_number || null,
                 admin_notes: ver?.admin_notes || ver?.rejection_reason || null,
-                last_reminder_sent_at: ver?.last_reminder_sent_at || null,
+                last_reminder_sent_at: ver?.last_reminder_sent_at || p.last_verification_reminder_at || null,
                 submitted_at: ver?.submitted_at || ver?.created_at || null,
                 updated_at: ver?.updated_at || ver?.reviewed_at || null,
             };
@@ -264,11 +274,21 @@ exports.sendReminder = async (req, res, next) => {
         }
 
         // Get user profile
-        const { data: profile, error: profileErr } = await adminClient
+        let profile, profileErr;
+        ({ data: profile, error: profileErr } = await adminClient
             .from('profiles')
-            .select('name, email')
+            .select('name, email, last_verification_reminder_at')
             .eq('user_id', user_id)
-            .maybeSingle();
+            .maybeSingle());
+
+        if (profileErr) {
+            // Column may not exist yet — retry without it
+            ({ data: profile, error: profileErr } = await adminClient
+                .from('profiles')
+                .select('name, email')
+                .eq('user_id', user_id)
+                .maybeSingle());
+        }
 
         if (profileErr) throw profileErr;
         if (!profile?.email) {
@@ -282,9 +302,12 @@ exports.sendReminder = async (req, res, next) => {
             .eq('user_id', user_id)
             .maybeSingle();
 
+        // Also check profile fallback for users with no verification row
+        const lastReminderAt = ver?.last_reminder_sent_at || profile.last_verification_reminder_at || null;
+
         // Enforce cooldown
-        if (ver?.last_reminder_sent_at && !canSendReminder(ver.last_reminder_sent_at)) {
-            const nextAllowed = new Date(new Date(ver.last_reminder_sent_at).getTime() + REMINDER_COOLDOWN_HOURS * 3600000);
+        if (lastReminderAt && !canSendReminder(lastReminderAt)) {
+            const nextAllowed = new Date(new Date(lastReminderAt).getTime() + REMINDER_COOLDOWN_HOURS * 3600000);
             return res.status(429).json({
                 success: false,
                 message: `Reminder already sent. Next allowed: ${nextAllowed.toLocaleString()}`
@@ -294,12 +317,22 @@ exports.sendReminder = async (req, res, next) => {
         // Send email
         await sendVerificationReminderEmail(profile.email, profile.name || 'User', role);
 
-        // Update last_reminder_sent_at in identity_verifications if row exists
+        // Persist last_reminder_sent_at.
+        // identity_verifications has NOT NULL constraints on document_type & document_front_url,
+        // so we can only update an existing row — not insert a bare tracking row.
+        // For users who never submitted (no row), we store the timestamp on their profile instead.
+        const now = new Date().toISOString();
         if (ver?.id) {
             await adminClient
                 .from('identity_verifications')
-                .update({ last_reminder_sent_at: new Date().toISOString() })
+                .update({ last_reminder_sent_at: now })
                 .eq('id', ver.id);
+        } else {
+            // No verification row yet — store on profile as fallback
+            await adminClient
+                .from('profiles')
+                .update({ last_verification_reminder_at: now })
+                .eq('user_id', user_id);
         }
 
         await logAction(req.user.id, 'VERIFICATION_REMINDER_SENT', user_id,

@@ -139,7 +139,7 @@ exports.getRevenueOverview = async (req, res, next) => {
         settings?.forEach(s => settingsMap[s.setting_key] = s.setting_value);
         
         const commissionRate = parseFloat(settingsMap['commission_percentage'] || '3') / 100;
-        const withdrawalFeeRate = 0.03; // Default 3%
+        const withdrawalFeeRate = 0.03;
 
         // 2. Aggregate Revenue Streams in parallel
         const [
@@ -148,67 +148,85 @@ exports.getRevenueOverview = async (req, res, next) => {
             { data: connectPurchases },
             { data: processedWithdrawals }
         ] = await Promise.all([
-            // Contract Payments (Released)
-            supabase.from('payments').select('amount').eq('status', 'released'),
+            // Contract Payments — released OR succeeded
+            supabase
+                .from('payments')
+                .select('amount')
+                .in('status', ['released', 'succeeded']),
             
-            // Memberships (Successful)
-            supabase.from('memberships').select('plan_snapshot'),
+            // Memberships — only ACTIVE ones with a price in plan_snapshot
+            supabase
+                .from('memberships')
+                .select('plan_snapshot')
+                .eq('status', 'ACTIVE'),
             
-            // Connect Purchases
-            supabase.from('connect_transactions').select('amount, metadata').eq('action_source', 'purchase'),
+            // Connect Purchases — action_source = 'purchase', type = 'CREDIT'
+            supabase
+                .from('connect_transactions')
+                .select('amount, metadata')
+                .eq('action_source', 'purchase')
+                .eq('type', 'CREDIT'),
             
-            // Withdrawals (Completed - often have fees)
-            supabase.from('withdrawals').select('amount').eq('status', 'COMPLETED')
+            // Withdrawals — COMPLETED status
+            supabase
+                .from('withdrawals')
+                .select('amount')
+                .eq('status', 'COMPLETED')
         ]);
 
         // 3. Calculate Totals
-        // Contract Commission
-        const contractTotalVolume = (contractPayments || []).reduce((sum, p) => sum + Number(p.amount), 0);
+
+        // Contract Commission: sum of released payment amounts × commission rate
+        const contractTotalVolume = (contractPayments || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
         const contractCommission = contractTotalVolume * commissionRate;
 
-        // Membership Revenue (Stored in INR in snapshot)
+        // Membership Revenue: plan_snapshot.price is stored in paise (Razorpay), divide by 100
         const membershipRevenue = (memberships || []).reduce((sum, m) => {
-            const price = Number(m.plan_snapshot?.price || 0);
-            // If price > 1000, it's likely in Paise, convert to INR
-            return sum + (price > 5000 ? price / 100 : price);
+            const rawPrice = Number(m.plan_snapshot?.price || 0);
+            // Razorpay stores in paise — values > 100 are paise, convert to INR
+            const priceINR = rawPrice > 100 ? rawPrice / 100 : rawPrice;
+            return sum + priceINR;
         }, 0);
 
-        // Connects Revenue (Metadata contains package info, but amount is connects. 
-        // We need to map package to price or use transaction history if price was logged)
-        // For now, use a standard rate: 1 Connect = 5 INR
+        // Connects Revenue: use metadata.price_inr if available, else metadata.price (paise → INR)
         const connectsRevenue = (connectPurchases || []).reduce((sum, c) => {
-             // In v2, we log package price in metadata if possible
-             const pkgPrice = Number(c.metadata?.price || 0);
-             if (pkgPrice > 0) return sum + (pkgPrice > 5000 ? pkgPrice / 100 : pkgPrice);
-             return sum + (Number(c.amount) * 5); // Fallback
+            const meta = c.metadata || {};
+            if (meta.price_inr) return sum + Number(meta.price_inr);
+            if (meta.price) {
+                const p = Number(meta.price);
+                return sum + (p > 500 ? p / 100 : p); // paise guard
+            }
+            if (meta.amount_inr) return sum + Number(meta.amount_inr);
+            return sum; // skip if no price info — don't fabricate
         }, 0);
 
-        // Withdrawal Fees (Assuming 3% fee taken by platform)
-        const withdrawalVolume = (processedWithdrawals || []).reduce((sum, w) => sum + Number(w.amount), 0);
+        // Withdrawal Fees
+        const withdrawalVolume = (processedWithdrawals || []).reduce((sum, w) => sum + Number(w.amount || 0), 0);
         const withdrawalFees = withdrawalVolume * withdrawalFeeRate;
 
         const totalRevenue = contractCommission + membershipRevenue + connectsRevenue + withdrawalFees;
 
-        // 4. Breakdown for Table
+        // 4. Breakdown
         const breakdown = [
-            { source: 'Contract Commission (3%)', amount: contractCommission, share: totalRevenue > 0 ? (contractCommission / totalRevenue) * 100 : 0 },
-            { source: 'Membership Plans', amount: membershipRevenue, share: totalRevenue > 0 ? (membershipRevenue / totalRevenue) * 100 : 0 },
-            { source: 'Connects Purchases', amount: connectsRevenue, share: totalRevenue > 0 ? (connectsRevenue / totalRevenue) * 100 : 0 },
-            { source: 'Withdrawal Fees (3%)', amount: withdrawalFees, share: totalRevenue > 0 ? (withdrawalFees / totalRevenue) * 100 : 0 }
+            { source: 'Contract Commission (3%)', amount: Number(contractCommission.toFixed(2)), share: totalRevenue > 0 ? (contractCommission / totalRevenue) * 100 : 0 },
+            { source: 'Membership Plans', amount: Number(membershipRevenue.toFixed(2)), share: totalRevenue > 0 ? (membershipRevenue / totalRevenue) * 100 : 0 },
+            { source: 'Connects Purchases', amount: Number(connectsRevenue.toFixed(2)), share: totalRevenue > 0 ? (connectsRevenue / totalRevenue) * 100 : 0 },
+            { source: 'Withdrawal Fees (3%)', amount: Number(withdrawalFees.toFixed(2)), share: totalRevenue > 0 ? (withdrawalFees / totalRevenue) * 100 : 0 }
         ];
 
         res.status(200).json({
             success: true,
             data: {
                 totalRevenue: Number(totalRevenue.toFixed(2)),
-                totalCommission: Number(contractCommission.toFixed(2)),
-                membershipRevenue: Number(membershipRevenue.toFixed(2)),
-                connectsRevenue: Number(connectsRevenue.toFixed(2)),
-                withdrawalFees: Number(withdrawalFees.toFixed(2)),
-                growth: 12.5, // Placeholder for trend
-                commissionTrend: "+8.2%", // Placeholder
-                revenueTrend: "+15.4%", // Placeholder
-                breakdown
+                contract_commission: Number(contractCommission.toFixed(2)),
+                total_commission: Number(contractCommission.toFixed(2)),
+                membership_revenue: Number(membershipRevenue.toFixed(2)),
+                connects_revenue: Number(connectsRevenue.toFixed(2)),
+                withdrawal_fees: Number(withdrawalFees.toFixed(2)),
+                breakdown,
+                // Volume stats for context
+                contractVolume: Number(contractTotalVolume.toFixed(2)),
+                withdrawalVolume: Number(withdrawalVolume.toFixed(2)),
             }
         });
     } catch (error) {

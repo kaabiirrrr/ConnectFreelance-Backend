@@ -159,6 +159,64 @@ function initSocketIO(httpServer) {
         const userRole = socket.userRole || null;
         logger.log(`[Socket] User connected: ${userId}`);
 
+        // ─── SQL PRESENCE RECORDING ───
+        const ipAddress = socket.handshake.headers['x-forwarded-for'] || socket.handshake.address || 'IP Unknown';
+        const userAgent = socket.handshake.headers['user-agent'] || '';
+        let deviceType = 'desktop';
+        if (/mobile|android|iphone|ipad|phone/i.test(userAgent)) deviceType = 'mobile';
+        else if (/tablet|ipad|playbook|silk/i.test(userAgent)) deviceType = 'tablet';
+
+        // 1. Insert session history record
+        adminClient.from('session_history').insert([{
+            user_id: userId,
+            ip_address: ipAddress,
+            user_agent: userAgent
+        }]).select('id').single().then(({ data: histData }) => {
+            if (histData) {
+                socket.historyId = histData.id;
+            }
+        }).catch(err => logger.error('[Socket] Failed to insert session history:', err));
+
+        // 2. Insert active session record
+        adminClient.from('active_sessions').insert([{
+            user_id: userId,
+            socket_id: socket.id,
+            ip_address: ipAddress,
+            user_agent: userAgent,
+            device_type: deviceType
+        }]).catch(err => logger.error('[Socket] Failed to insert active session:', err));
+
+        // 3. Upsert user presence state
+        adminClient.from('user_presence').upsert({
+            user_id: userId,
+            status: 'online',
+            last_seen: new Date().toISOString(),
+            ip_address: ipAddress,
+            device_info: { userAgent, deviceType }
+        }).catch(err => logger.error('[Socket] Failed to upsert user presence:', err));
+
+        // 4. Check if admin and upsert admin presence state
+        adminClient.from('admins').select('role, name').eq('id', userId).maybeSingle().then(({ data: adminRow }) => {
+            if (adminRow) {
+                socket.isAdmin = true;
+                socket.adminRole = adminRow.role;
+                socket.adminName = adminRow.name;
+                
+                adminClient.from('admin_presence').upsert({
+                    admin_id: userId,
+                    status: 'online',
+                    last_active: new Date().toISOString(),
+                    current_module: 'Command Center'
+                }).catch(err => logger.error('[Socket] Failed to upsert admin presence:', err));
+            }
+        }).catch(err => logger.error('[Socket] Failed to check admin row:', err));
+
+        // Emit login presence event
+        adminClient.from('presence_events').insert([{
+            user_id: userId,
+            event_type: 'login'
+        }]).catch(err => logger.error('[Socket] Failed to log presence event:', err));
+
         // Track online status
         const isFirstSocket = !onlineUsers.has(userId) || onlineUsers.get(userId).size === 0;
         if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
@@ -227,6 +285,83 @@ function initSocketIO(httpServer) {
         // --- 🛡️ BANK-GRADE: PRIVACY HARDENING ---
         // io.emit('online-users', [...onlineUsers.keys()]); // REMOVED: Do not broadcast globally
 
+
+        // ─── HEARTBEAT ────────────────────────────────────────────────────
+        // Client pings every 30s to show they are still active
+        socket.on('heartbeat', ({ currentPage } = {}) => {
+            heartbeats.set(userId, Date.now());
+
+            // Keep presence state as 'active' in DB and update current_page
+            adminClient.from('user_presence').upsert({
+                user_id: userId,
+                status: 'active',
+                last_active: new Date().toISOString(),
+                last_seen: new Date().toISOString(),
+                current_page: currentPage || null
+            }).catch(err => logger.error('[Socket] Heartbeat presence update error:', err));
+
+            // Update active session ping timestamp
+            adminClient.from('active_sessions').update({
+                last_ping_at: new Date().toISOString()
+            }).eq('socket_id', socket.id).catch(err => logger.error('[Socket] Heartbeat session ping error:', err));
+
+            // Acknowledge the heartbeat
+            socket.emit('heartbeat-ack', { ts: Date.now() });
+        });
+
+        // ─── ACTIVITY PING ────────────────────────────────────────────────
+        // Throttled activity ping from mouse/keyboard interactions on client
+        socket.on('activity-ping', ({ currentPage } = {}) => {
+            heartbeats.set(userId, Date.now());
+
+            adminClient.from('user_presence').upsert({
+                user_id: userId,
+                status: 'active',
+                last_active: new Date().toISOString(),
+                current_page: currentPage || null
+            }).catch(err => logger.error('[Socket] Activity ping update error:', err));
+        });
+
+        // ─── IDLE STATUS CHANGE ───────────────────────────────────────────
+        // Emitted by Page Visibility API (tab blur) or inactivity timer
+        socket.on('status-change', ({ status, currentPage } = {}) => {
+            const allowedStatuses = ['active', 'idle', 'offline'];
+            const safeStatus = allowedStatuses.includes(status) ? status : 'idle';
+
+            adminClient.from('user_presence').upsert({
+                user_id: userId,
+                status: safeStatus,
+                last_active: new Date().toISOString(),
+                current_page: currentPage || null
+            }).catch(err => logger.error('[Socket] Status change update error:', err));
+
+            if (safeStatus === 'idle') {
+                adminClient.from('presence_events').insert([{
+                    user_id: userId,
+                    event_type: 'idle_start'
+                }]).catch(err => logger.error('[Socket] idle_start event log error:', err));
+            } else if (safeStatus === 'active') {
+                adminClient.from('presence_events').insert([{
+                    user_id: userId,
+                    event_type: 'idle_end'
+                }]).catch(err => logger.error('[Socket] idle_end event log error:', err));
+            }
+        });
+
+        // ─── ADMIN MODULE TRACKING ─────────────────────────────────────────
+        // Emitted by admin UI when navigating between admin pages/modules
+        socket.on('admin-module-update', ({ module } = {}) => {
+            if (!socket.isAdmin) return;
+            const allowedModules = ['Dashboard', 'Users', 'KYC', 'Disputes', 'Moderation', 'Treasury', 'Contracts', 'Jobs', 'Support', 'FAQ', 'Settings', 'Command Center', 'Fraud', 'Trust Graph', 'Verification', 'Admins'];
+            const safeModule = module && allowedModules.includes(module) ? module : 'Dashboard';
+
+            adminClient.from('admin_presence').upsert({
+                admin_id: userId,
+                status: 'online',
+                last_active: new Date().toISOString(),
+                current_module: safeModule
+            }).catch(err => logger.error('[Socket] Admin module update error:', err));
+        });
 
         // Middleware for event-level rate limiting (strikes)
         socket.use(([event, ...args], next) => {
@@ -586,6 +721,23 @@ function initSocketIO(httpServer) {
 
         // ─── DISCONNECT ──────────────────────────────────────────────────
         socket.on('disconnect', () => {
+            // ─── SQL PRESENCE CLEANUP ───
+            // 1. Delete active session
+            adminClient.from('active_sessions').delete().eq('socket_id', socket.id)
+                .catch(err => logger.error('[Socket] Failed to delete active session:', err));
+
+            // 2. Update session history logout time
+            if (socket.historyId) {
+                const logoutTime = new Date();
+                adminClient.from('session_history')
+                    .update({
+                        logout_at: logoutTime.toISOString(),
+                        termination_reason: 'disconnect'
+                    })
+                    .eq('id', socket.historyId)
+                    .catch(err => logger.error('[Socket] Failed to update session history:', err));
+            }
+
             if (userId) {
                 const sockets = onlineUsers.get(userId);
                 if (sockets) {
@@ -593,6 +745,24 @@ function initSocketIO(httpServer) {
                     if (sockets.size === 0) {
                         onlineUsers.delete(userId);
                         userOnlinePreferences.delete(userId);
+
+                        // Update presence tables to offline / inactive
+                        adminClient.from('user_presence').update({
+                            status: 'offline',
+                            last_seen: new Date().toISOString()
+                        }).eq('user_id', userId).catch(err => logger.error('[Socket] Failed to update user presence to offline:', err));
+
+                        if (socket.isAdmin) {
+                            adminClient.from('admin_presence').update({
+                                status: 'inactive',
+                                last_active: new Date().toISOString()
+                            }).eq('admin_id', userId).catch(err => logger.error('[Socket] Failed to update admin presence to inactive:', err));
+                        }
+
+                        adminClient.from('presence_events').insert([{
+                            user_id: userId,
+                            event_type: 'logout'
+                        }]).catch(err => logger.error('[Socket] Failed to log presence event:', err));
 
                         // Broadcast offline status to conversation partners
                         adminClient

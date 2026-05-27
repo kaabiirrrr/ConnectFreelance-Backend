@@ -5,6 +5,19 @@ const logger = require('../../utils/logger');
 /**
  * Skills Management
  */
+exports.getSkills = async (req, res, next) => {
+    try {
+        const { data, error } = await supabase
+            .from('skills')
+            .select('*')
+            .order('name');
+        if (error) throw error;
+        res.status(200).json({ success: true, data: data || [] });
+    } catch (error) {
+        next(error);
+    }
+};
+
 exports.addSkill = async (req, res, next) => {
     try {
         const { name, category } = req.body;
@@ -17,6 +30,24 @@ exports.addSkill = async (req, res, next) => {
         if (error) throw error;
         await logAction(req.user.id, 'SKILL_ADD', data.id.toString(), `Added skill: ${name}`);
         res.status(201).json({ success: true, data });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.updateSkill = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { name, category } = req.body;
+        const { data, error } = await supabase
+            .from('skills')
+            .update({ name, category })
+            .eq('id', id)
+            .select()
+            .single();
+        if (error) throw error;
+        await logAction(req.user.id, 'SKILL_UPDATE', id.toString(), `Updated skill: ${name}`);
+        res.status(200).json({ success: true, data });
     } catch (error) {
         next(error);
     }
