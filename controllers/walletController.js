@@ -18,25 +18,25 @@ exports.getWallet = async (req, res, next) => {
     try {
         const userId = req.user.id;
 
-        let { data: wallet, error } = await supabase
+        let { data: wallet, error } = await adminClient
             .from('wallets')
-            .select('id, user_id, available_balance, pending_balance, total_earned, total_withdrawn, updated_at')
+            .select('user_id, available_balance, pending_balance, total_earned, total_withdrawn, updated_at')
             .eq('user_id', userId)
             .maybeSingle();
+
+        if (error) throw error;
 
         // Auto-create wallet row if first visit
         if (!wallet) {
             const { data: newWallet, error: createError } = await adminClient
                 .from('wallets')
                 .insert([{ user_id: userId }])
-                .select('id, user_id, available_balance, pending_balance, total_earned, total_withdrawn, updated_at')
+                .select('user_id, available_balance, pending_balance, total_earned, total_withdrawn, updated_at')
                 .single();
 
             if (createError) throw createError;
             wallet = newWallet;
         }
-
-        if (error) throw error;
 
         res.status(200).json({
             success: true,
@@ -359,7 +359,7 @@ exports.addPendingFunds = async (freelancerId, amount) => {
 exports.getWalletHistory = async (req, res, next) => {
     try {
         const userId = req.user.id;
-        const { data, error } = await supabase
+        const { data, error } = await adminClient
             .from('wallet_transactions')
             .select('*')
             .eq('user_id', userId)
