@@ -1,6 +1,66 @@
 const adminClient = require('../supabase/adminClient');
+const logger = require('../utils/logger');
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// POST /api/direct-contracts/lookup-freelancer
+// Resolve a freelancer email → their user ID + profile info
+exports.lookupFreelancerByEmail = async (req, res, next) => {
+    try {
+        const { email } = req.body;
+        if (!email || !email.includes('@')) {
+            return res.status(400).json({ success: false, message: 'Valid email is required' });
+        }
+
+        // Look up in auth.users via admin client
+        const { data: authUsers, error: authErr } = await adminClient.auth.admin.listUsers({
+            page: 1,
+            perPage: 1000,
+        });
+
+        if (authErr) throw authErr;
+
+        const authUser = authUsers?.users?.find(
+            u => u.email?.toLowerCase() === email.toLowerCase()
+        );
+
+        if (!authUser) {
+            return res.status(404).json({ success: false, message: `No account found for ${email}` });
+        }
+
+        // Verify they are a FREELANCER
+        const { data: userRow } = await adminClient
+            .from('users')
+            .select('id, role')
+            .eq('id', authUser.id)
+            .maybeSingle();
+
+        if (!userRow || userRow.role !== 'FREELANCER') {
+            return res.status(400).json({ success: false, message: `${email} is not a registered freelancer` });
+        }
+
+        // Fetch their profile
+        const { data: profile } = await adminClient
+            .from('profiles')
+            .select('name, avatar_url, title, hourly_rate')
+            .eq('user_id', authUser.id)
+            .maybeSingle();
+
+        res.status(200).json({
+            success: true,
+            data: {
+                id: authUser.id,
+                email: authUser.email,
+                name: profile?.name || authUser.email,
+                avatar_url: profile?.avatar_url || null,
+                title: profile?.title || null,
+                hourly_rate: profile?.hourly_rate || null,
+            }
+        });
+    } catch (err) {
+        next(err);
+    }
+};
 
 // POST /api/direct-contracts
 // Client sends a direct contract offer to a freelancer

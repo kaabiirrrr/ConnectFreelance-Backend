@@ -5,6 +5,7 @@ const dc = require('../controllers/directContractController');
 
 router.use(protect);
 
+router.post('/lookup-freelancer', authorize('CLIENT'), dc.lookupFreelancerByEmail);
 router.post('/', authorize('CLIENT'), dc.createDirectContract);
 router.get('/', dc.listDirectContracts);
 router.get('/:id', dc.getDirectContract);
