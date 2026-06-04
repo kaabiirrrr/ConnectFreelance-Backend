@@ -16,6 +16,25 @@ function formatPrice(hourlyRate) {
 function mapFreelancerSummary(profile, savedAt) {
     if (!profile) return null;
     const rating = profile.rating != null ? Number(profile.rating) : null;
+    const sd = (typeof profile.step_data === 'object' && profile.step_data) ? profile.step_data : {};
+    
+    // Resolve experience_years from all step_data paths
+    const experience_years =
+        sd.professional_info?.experience ||
+        sd.personal_info?.experience ||
+        sd.professional?.experience ||
+        sd.experience ||
+        profile.experience_years ||
+        '';
+
+    // Resolve work_hours
+    const work_hours =
+        sd.professional_info?.work_hours ||
+        sd.professional?.work_hours ||
+        sd.work_hours ||
+        profile.work_hours ||
+        null;
+
     return {
         id: profile.user_id,
         name: profile.name,
@@ -24,7 +43,12 @@ function mapFreelancerSummary(profile, savedAt) {
         skills: Array.isArray(profile.skills) ? profile.skills : [],
         rating: Number.isFinite(rating) ? rating : null,
         price: formatPrice(profile.hourly_rate),
-        saved_at: savedAt
+        saved_at: savedAt,
+        reliability_score: profile.reliability_score,
+        experience_years: experience_years,
+        work_hours: work_hours,
+        is_verified: profile.is_verified,
+        has_availability_badge: profile.has_availability_badge
     };
 }
 

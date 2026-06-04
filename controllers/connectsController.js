@@ -98,10 +98,34 @@ exports.getHistory = async (req, res, next) => {
         const signed = (data || []).map(tx => ({
             ...tx,
             amount: tx.type === 'DEBIT' ? -Math.abs(tx.amount) : Math.abs(tx.amount),
-            description: tx.description || formatActionLabel(tx.action_source, tx.type)
+            description: tx.description || formatActionLabel(tx.action_source, tx.type),
+            // Pull job_title from metadata JSONB for old records that didn't store reference_id
+            _meta_job_title: tx.metadata?.job_title || null,
         }));
 
-        res.status(200).json({ success: true, data: signed });
+        // Enrich job_post entries with job title via reference_id (for newer records)
+        const jobIds = signed
+            .filter(tx => tx.action_source === 'job_post' && tx.reference_id)
+            .map(tx => tx.reference_id);
+
+        let jobTitleMap = {};
+        if (jobIds.length > 0) {
+            const { data: jobs } = await adminClient
+                .from('jobs')
+                .select('id, title')
+                .in('id', jobIds);
+            (jobs || []).forEach(j => { jobTitleMap[j.id] = j.title; });
+        }
+
+        const enriched = signed.map(tx => ({
+            ...tx,
+            // Priority: reference_id join > metadata.job_title > description already contains title
+            job_title: (tx.reference_id && jobTitleMap[tx.reference_id])
+                ? jobTitleMap[tx.reference_id]
+                : (tx._meta_job_title || null),
+        }));
+
+        res.status(200).json({ success: true, data: enriched });
     } catch (error) {
         next(error);
     }

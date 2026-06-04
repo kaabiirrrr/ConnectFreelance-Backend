@@ -173,6 +173,7 @@ exports.getHiredFreelancers = async (req, res) => {
                 jobTitle: c.title || job?.title || 'Unknown Job',
                 bid_deadline: job?.bid_deadline || null,
                 budget_amount: c.agreed_rate || job?.budget_amount || null,
+                job_budget: job?.budget_amount || null,
                 budget_type: job?.budget_type || 'fixed',
             };
         });

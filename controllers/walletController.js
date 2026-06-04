@@ -275,7 +275,9 @@ exports.verifyTopup = async (req, res, next) => {
         res.status(200).json({
             success: true,
             message: 'Top-up successful',
-            balance: newBalance
+            balance: newBalance,
+            newBalance,
+            data: { newBalance, balance: newBalance }
         });
     } catch (err) {
         logger.error('[Wallet] Unexpected verifyTopup error', err);

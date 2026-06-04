@@ -128,7 +128,7 @@ const recalculateProjectHealth = async (jobId) => {
         const healthScore = Math.round(
             (0.25 * reliability) +
             (0.25 * (100 - riskScore)) +
-            (0.20 * (100 - (deadlineProb * 100))) +
+            (0.20 * (100 - deadlineProb)) +
             (0.20 * completionRate) +
             (0.10 * activityScore)
         );

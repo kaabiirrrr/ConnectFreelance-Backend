@@ -83,22 +83,22 @@ const buildStandardEmail = (content) => {
 <body style="margin:0;padding:0;">
 <div class="email-bg" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background-color:#f9fafb;padding:40px 20px;color:#374151;">
   <div style="text-align:center;margin-bottom:32px;">
-    <img src="${frontendUrl}/Logo-LightMode-trimmed.png" alt="Connect" height="56" class="light-logo" style="object-fit:contain; border:none; outline:none;" />
+    <img src="${frontendUrl}/Logo-LightMode-trimmed.png" alt="Connect" height="36" class="light-logo" style="object-fit:contain; border:none; outline:none;" />
     <!--[if !mso]><!---->
-    <img src="${frontendUrl}/Logo2.png" alt="Connect" height="56" class="dark-logo" style="object-fit:contain; border:none; outline:none; display:none;" />
+    <img src="${frontendUrl}/Logo2.png" alt="Connect" height="36" class="dark-logo" style="object-fit:contain; border:none; outline:none; display:none;" />
     <!--<![endif]-->
   </div>
-  <div class="email-card" style="max-width:540px;margin:0 auto;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:40px;">
+  <div class="email-card" style="max-width:540px;margin:0 auto;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;padding:40px;box-shadow:0 1px 3px rgba(0,0,0,0.02);">
     ${content}
-    <hr style="border:none;border-top:1px solid #e5e7eb;margin:0 0 32px 0;">
-    <div style="text-align:center;margin-bottom:16px;">
-      <img src="${frontendUrl}/WhatsApp_Image_2026-05-20_at_20.28.16-removebg-preview.png" alt="from Connect" height="40" class="footer-logo-light" style="object-fit:contain; border:none; outline:none;" />
+    <hr style="border:none;border-top:1px solid #e5e7eb;margin:32px 0 24px 0;">
+    <div style="text-align:center;">
+      <img src="${frontendUrl}/WhatsApp_Image_2026-05-20_at_20.28.16-removebg-preview.png" alt="SKIMMER'S" height="32" class="footer-logo-light" style="object-fit:contain; border:none; outline:none;" />
       <!--[if !mso]><!---->
-      <img src="${frontendUrl}/WhatsApp_Image_2026-05-20_at_20.28.16-removebg-preview.png" alt="from Connect" height="40" class="footer-logo-dark" style="object-fit:contain; border:none; outline:none; display:none;" />
+      <img src="${frontendUrl}/WhatsApp_Image_2026-05-20_at_20.28.16-removebg-preview.png" alt="SKIMMER'S" height="32" class="footer-logo-dark" style="object-fit:contain; border:none; outline:none; display:none;" />
       <!--<![endif]-->
     </div>
-    <p class="text-muted" style="font-size:12px;color:#9ca3af;text-align:center;margin:0;">© ${new Date().getFullYear()} Connect Freelance. All rights reserved.</p>
   </div>
+  <p class="text-muted" style="font-size:12px;color:#9ca3af;text-align:center;margin:24px 0 0 0;">© ${new Date().getFullYear()} Connect Freelance. All rights reserved.</p>
 </div>
 </body>
 </html>`;
@@ -137,6 +137,29 @@ exports.sendDeleteAccountOTPEmail = async (toEmail, otp, name = '') => {
         });
     } catch (err) {
         logger.error(`[Email] Delete OTP send failed to ${toEmail}:`, err?.response?.data || err.message);
+    }
+};
+
+exports.sendActionOTPEmail = async (toEmail, otp, action, name = '') => {
+    const actionLabel = action === 'job_post' ? 'post your job' : 'submit your proposal';
+    const subject = action === 'job_post' 
+        ? 'Verify to Post Your Job on Connect' 
+        : 'Verify to Submit Your Proposal on Connect';
+
+    try {
+        await sendEmail({
+            to: toEmail,
+            subject,
+            html: buildStandardEmail(`
+                <p class="text-main" style="font-size:16px;line-height:1.5;margin:0 0 24px;color:#111827;">Hello ${name || 'User'},</p>
+                <p class="text-main" style="font-size:16px;line-height:1.7;margin:0 0 24px;color:#111827;">You are trying to <strong>${actionLabel}</strong> on Connect Freelance. Please use the following 6-digit verification code to complete this action:</p>
+                <div class="otp-box" style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:6px;padding:20px;text-align:center;font-size:32px;font-weight:700;letter-spacing:8px;color:#0ea5e9;margin-bottom:24px;">${otp}</div>
+                <p class="text-muted" style="font-size:15px;line-height:1.6;margin:0 0 32px;color:#6b7280;">This code will expire in 10 minutes. If you did not request this, you can safely ignore this email.</p>
+            `),
+        });
+    } catch (err) {
+        logger.error(`[Email] Action OTP send failed to ${toEmail}:`, err?.response?.data || err.message);
+        throw err;
     }
 };
 

@@ -769,7 +769,7 @@ exports.getClientPendingProposals = async (req, res, next) => {
                 proposed_rate,
                 created_at,
                 status,
-                jobs(title),
+                jobs(title, budget_amount, budget_type),
                 freelancer:profiles(name, avatar_url)
             `)
             .in('job_id', jobIds)
@@ -785,6 +785,8 @@ exports.getClientPendingProposals = async (req, res, next) => {
             freelancerName: p.freelancer?.name || "Freelancer",
             freelancerImage: p.freelancer?.avatar_url || null,
             bidAmount: p.proposed_rate,
+            budgetAmount: p.jobs?.budget_amount || null,
+            budgetType: p.jobs?.budget_type || null,
             coverLetter: p.cover_letter,
             createdAt: p.created_at,
             status: p.status

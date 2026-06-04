@@ -171,6 +171,7 @@ app.use(require('./middleware/errorTracker'));
 const registerRoutes = () => {
     console.log("[Boot] Registering API routes...");
     app.use('/api/auth',            require('./routes/authRoutes'));
+    app.use('/api/otp',             require('./routes/otpActionRoutes'));
     app.use('/api/connects',        require('./routes/connectsRoutes'));
     app.use('/api/jobs',            require('./routes/jobRoutes'));
     app.use('/api/proposals',       require('./routes/proposalRoutes'));

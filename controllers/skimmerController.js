@@ -11,6 +11,13 @@ exports.getProjectOverview = async (req, res, next) => {
     try {
         const { jobId } = req.params;
 
+        // Recalculate health (safely debounced inside engine with FREEZE_WINDOW)
+        try {
+            await recalculateProjectHealth(jobId);
+        } catch (err) {
+            logger.error('[SkimmerController] recalculateProjectHealth failed', err);
+        }
+
         const { data: insight, error } = await adminClient
             .from('project_insights')
             .select('*')
@@ -26,15 +33,23 @@ exports.getProjectOverview = async (req, res, next) => {
         }
 
         if (!insight) {
-            try {
-                const fresh = await recalculateProjectHealth(jobId);
-                return res.status(200).json({ success: true, data: fresh });
-            } catch (_) {
-                return res.status(200).json({ success: true, data: { health_score: 0, change_value: 0, delay_risk: 0, team_efficiency: 0 } });
-            }
+            return res.status(200).json({ success: true, data: { health_score: 0, change_value: 0, delay_risk: 0, team_efficiency: 0 } });
         }
 
-        res.status(200).json({ success: true, data: insight });
+        // Fetch latest change_value from project_health_history
+        let change_value = 0;
+        try {
+            const { data: history } = await adminClient
+                .from('project_health_history')
+                .select('change_value')
+                .eq('job_id', jobId)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            if (history) change_value = history.change_value;
+        } catch (_) {}
+
+        res.status(200).json({ success: true, data: { ...insight, change_value } });
     } catch (err) {
         next(err);
     }

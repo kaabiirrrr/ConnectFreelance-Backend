@@ -234,15 +234,30 @@ exports.getDirectContract = async (req, res, next) => {
         error = result.error;
 
         // Fallback: if join fails, fetch without joins
-        if (error) {
+        if (error || (data && (!data.client || !data.freelancer))) {
             const fallback = await adminClient
                 .from('contracts')
                 .select('*')
                 .eq('id', id)
                 .eq('is_direct', true)
                 .maybeSingle();
-            data = fallback.data;
-            error = fallback.error;
+            
+            if (fallback.data) {
+                const contractData = fallback.data;
+                const { data: profiles, error: profErr } = await adminClient
+                    .from('profiles')
+                    .select('user_id, name, avatar_url, title, company_name, hourly_rate')
+                    .in('user_id', [contractData.client_id, contractData.freelancer_id].filter(Boolean));
+                
+                if (!profErr && profiles) {
+                    const profileMap = {};
+                    profiles.forEach(p => { profileMap[p.user_id] = p; });
+                    contractData.client = profileMap[contractData.client_id] || null;
+                    contractData.freelancer = profileMap[contractData.freelancer_id] || null;
+                    data = contractData;
+                    error = null;
+                }
+            }
         }
 
         if (error) throw error;

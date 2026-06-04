@@ -115,11 +115,23 @@ class ConnectsService {
             const cost = costMap[actionSource] || 0;
             if (cost <= 0) return true;
 
+            const actionLabels = {
+                job_post: 'Job Posted',
+                proposal_submit: 'Proposal Submitted',
+                proposal_accept: 'Freelancer Hired',
+                membership_payment: 'Membership Purchase',
+            };
+
             // RPC call to debit_connects_atomic
+            const actionLabel = actionLabels[actionSource] || 'Deduction';
             const { data: newBalance, error } = await adminClient.rpc('debit_connects_atomic', {
                 p_user_id: userId,
                 p_amount: cost,
                 p_action_source: actionSource,
+                p_description: metadata.job_title
+                    ? `${actionLabel} · ${metadata.job_title}`
+                    : (metadata.description || actionLabel),
+                p_reference_id: metadata.job_id || null,
                 p_metadata: { ...metadata, source: actionSource }
             });
 
