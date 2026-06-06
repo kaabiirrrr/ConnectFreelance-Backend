@@ -264,7 +264,24 @@ exports.login = async (req, res, next) => {
         const isEmailVerifiedInAuth = !!authData.user.email_confirmed_at;
 
         if (!profile) {
-            logger.log(`[Login][${traceId}] Profile missing. Syncing...`);
+            // ── Deleted User Detection ──────────────────────────────────────
+            // Supabase Auth succeeded (password was valid), but no profile row
+            // exists. This means the user was deleted by an admin from our DB.
+            // For direct password logins: we must NOT silently recreate the
+            // profile. Instead, surface a clear error so the frontend can show
+            // a "User not found — please sign up" message.
+            // Admin logins (isAdminRole) bypass this check — they're managed
+            // separately and may not have a profiles row.
+            if (!isAdminRole) {
+                logger.warn(`[Login][${traceId}] Auth succeeded but profile missing for ${userEmail}. Likely admin-deleted user.`);
+                return res.status(410).json({
+                    success: false,
+                    message: 'User not found. Please create a profile first.',
+                    code: 'USER_NOT_FOUND'
+                });
+            }
+
+            logger.log(`[Login][${traceId}] Admin user with no profile row. Syncing...`);
             
             // 3.1 Ensure record in public.users exists (Intermediate table)
             const { error: userSyncError } = await adminClient
@@ -573,6 +590,27 @@ exports.forgotPassword = async (req, res, next) => {
         const { email } = req.body;
         const frontendUrl = process.env.FRONTEND_URL || 'https://connectfreelance.in';
 
+        // ── Deleted User Detection ──────────────────────────────────────────
+        // Check if a profile exists for this email BEFORE generating a recovery
+        // link. If the user was deleted by admin, their Supabase Auth entry may
+        // still exist and generateLink() would succeed — sending them a reset
+        // email for an account that no longer has a profile. We surface a clear
+        // error instead so the frontend can prompt them to sign up.
+        const { data: existingProfile } = await adminClient
+            .from('profiles')
+            .select('user_id, name')
+            .eq('email', email)
+            .maybeSingle();
+
+        if (!existingProfile) {
+            logger.warn(`[ForgotPassword] No profile found for email: ${email}. Likely deleted user.`);
+            return res.status(404).json({
+                success: false,
+                message: 'No account found with this email. Please sign up to create a profile.',
+                code: 'USER_NOT_FOUND'
+            });
+        }
+
         // Use Admin API to generate a highly-secure recovery link without triggering Supabase's default email
         const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
             type: 'recovery',
@@ -586,21 +624,15 @@ exports.forgotPassword = async (req, res, next) => {
             // Log the error but don't leak enumeration to the client
             logger.error('[ForgotPassword] Error generating recovery link:', linkError.message);
         } else if (linkData?.properties?.action_link) {
-            // Fetch user's name to personalize the email
-            let name = email.split('@')[0];
-            try {
-                const { data: profile } = await adminClient.from('profiles').select('name').eq('email', email).maybeSingle();
-                if (profile && profile.name) name = profile.name;
-            } catch (err) {
-                logger.warn('[ForgotPassword] Failed to fetch profile name:', err.message);
-            }
+            // Use the name from the profile we already fetched above
+            const name = existingProfile.name || email.split('@')[0];
 
             // Send our beautifully branded custom email via Resend
             await sendPasswordResetEmail(email, linkData.properties.action_link, name);
             logger.info(`[ForgotPassword] Sent password reset email to ${email}`);
         }
 
-        // Always return success to prevent email enumeration
+        // Always return success to prevent email enumeration for valid accounts
         res.status(200).json({ success: true, message: 'If an account exists, a password reset link has been sent.' });
     } catch (error) {
         logger.error('[ForgotPassword] FATAL:', error);
