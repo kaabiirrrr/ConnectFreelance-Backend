@@ -598,8 +598,17 @@ exports.updateProfileStatus = async (req, res, next) => {
                 'dob', 'gender', 'phone', 'website', 'bio', 'title', 'avatar_url',
                 'step_data', 'portfolio', 'skills', 'experience', 'hourly_rate',
                 'location', 'country', 'city', 'updated_at',
+                // Skills / category
+                'category',
+                // Account / auth extras
+                'email', 'role', 'rating', 'connects_balance',
+                'is_banned', 'is_restricted', 'warning_count',
+                'online_for_messages', 'resume_url',
+                // Company (client) fields
+                'company_name', 'company_size', 'industry',
                 // Analytics / feature flags
-                'has_availability_badge', 'is_profile_complete'
+                'has_availability_badge', 'is_profile_complete',
+                'profile_completion_percentage'
             ];
 
             const safePayload = { ...updates };
